@@ -1,5 +1,3 @@
-
-# -*- coding: utf-8 -*-
 import streamlit as st
 import datetime
 import pandas as pd
@@ -7,6 +5,7 @@ from io import BytesIO
 import calendar
 from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
 
+# ===== 主日數與幸運物件資料 =====
 day_meaning = {
     1: {"名稱": "創造日", "指引": "展現創意，展現自我魅力。", "星": "⭐⭐⭐⭐"},
     2: {"名稱": "連結日", "指引": "適合合作，溝通與等待機會。", "星": "⭐⭐"},
@@ -31,6 +30,7 @@ lucky_map = {
     9: {"色": "⚪ 白色", "水晶": "白水晶", "小物": "小香包"},
 }
 
+# ===== 工具函式 =====
 def reduce_to_digit(n):
     while n > 9:
         n = sum(int(x) for x in str(n))
@@ -40,43 +40,64 @@ def format_layers(total):
     mid = sum(int(x) for x in str(total))
     return f"{total}/{mid}/{reduce_to_digit(mid)}" if mid > 9 else f"{total}/{mid}"
 
-def get_additional_guidance(flowing_day_str):
-    combinations = {
-        "11/2": "這是合作與溝通的日子，適合建立新的合作關係，展現團隊精神。",
-        "12/3": "表達自我與分享想法，創造愉快的氛圍，適合進行創意討論。",
-        "13/4": "穩定與結構系列日子，適合規劃未來，建立穩固基礎。",
-        "32/5": "平衡創意與行動，迎接新計畫，啟動變革。",
-        "41/5": "務實行動與創意思考相結合，打造新機會。",
-    }
-    return combinations.get(flowing_day_str, "")
+def get_flowing_year_ref(query_date, bday):
+    query_date = query_date.date() if hasattr(query_date, "date") else query_date
+    cutoff = datetime.date(query_date.year, bday.month, bday.day)
+    return query_date.year - 1 if query_date < cutoff else query_date.year
 
+def get_flowing_month_ref(query_date, birthday):
+    query_date = query_date.date() if hasattr(query_date, "date") else query_date
+    if query_date.day < birthday.day:
+        return query_date.month - 1 if query_date.month > 1 else 12
+    return query_date.month
+
+# ===== Streamlit 設定 =====
 st.set_page_config(page_title="樂覺製所生命靈數", layout="centered")
 st.title("🧭 樂覺製所生命靈數")
 st.markdown("在數字之中，\n我們與自己不期而遇。\n**Be true, be you — 讓靈魂，自在呼吸。**")
 
-birthday = st.date_input("請輸入生日", value=datetime.date(1990, 1, 1))
+# ===== 使用者輸入 =====
+birthday = st.date_input(
+    "請輸入生日",
+    value=datetime.date(1990, 1, 1),
+    min_value=datetime.date(1900, 1, 1),  # ✅ 修正可選最早1900
+    max_value=datetime.date.today()
+)
 target_year = st.number_input("請選擇年份", min_value=1900, max_value=2100, value=datetime.datetime.now().year)
 target_month = st.selectbox("請選擇月份", list(range(1, 13)), index=datetime.datetime.now().month - 1)
 
+# ===== 製作流日日曆表 =====
 if st.button("🎉 產生日曆建議表"):
     _, last_day = calendar.monthrange(target_year, target_month)
-    days = pd.date_range(start=datetime.date(target_year, target_month, 1), end=datetime.date(target_year, target_month, last_day))
+    days = pd.date_range(datetime.date(target_year, target_month, 1), datetime.date(target_year, target_month, last_day))
 
     data = []
     for d in days:
-        flowing_day_sum = sum(int(x) for x in f"{birthday.year}{birthday.month:02}{d.day:02}")
-        flowing_day_str = format_layers(flowing_day_sum)
-        main_number = reduce_to_digit(flowing_day_sum)
+        fd_total = sum(int(x) for x in f"{birthday.year}{birthday.month:02}{d.day:02}")
+        flowing_day = format_layers(fd_total)
+        main_number = reduce_to_digit(fd_total)
         meaning = day_meaning.get(main_number, {})
         lucky = lucky_map.get(main_number, {})
 
-        guidance = meaning.get("指引", "") + " " + get_additional_guidance(flowing_day_str)
+        date_str = d.strftime("%Y-%m-%d")
+        weekday_str = d.strftime("%A")
+
+        year_ref = get_flowing_year_ref(d, birthday)
+        fy_total = sum(int(x) for x in f"{year_ref}{birthday.month:02}{birthday.day:02}")
+        flowing_year = format_layers(fy_total)
+
+        fm_ref = get_flowing_month_ref(d, birthday)
+        fm_total = sum(int(x) for x in f"{birthday.year}{fm_ref:02}{birthday.day:02}")
+        flowing_month = format_layers(fm_total)
 
         data.append({
-            "日期": d.strftime("%Y-%m-%d"),
-            "星期": d.strftime("%A"),
-            "流日": flowing_day_str,
-            "指引": guidance,
+            "日期": date_str,
+            "星期": weekday_str,
+            "流年": flowing_year,
+            "流月": flowing_month,
+            "流日": flowing_day,
+            "運勢指數": meaning.get("星", ""),
+            "指引": meaning.get("指引", ""),
             "幸運色": lucky.get("色", ""),
             "水晶": lucky.get("水晶", ""),
             "幸運小物": lucky.get("小物", "")
@@ -84,3 +105,34 @@ if st.button("🎉 產生日曆建議表"):
 
     df = pd.DataFrame(data)
     st.dataframe(df)
+
+    # ===== Excel 儲存邏輯 =====
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="流年月曆")
+        workbook = writer.book
+        worksheet = workbook["流年月曆"]
+
+        header_font = Font(size=12, bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
+        header_alignment = Alignment(horizontal="center", vertical="center")
+
+        for cell in worksheet[1]:
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_alignment
+
+        thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+        for row in worksheet.iter_rows():
+            for cell in row:
+                cell.border = thin_border
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+            worksheet.row_dimensions[row[0].row].height = 35
+
+    output.seek(0)
+    st.download_button(
+        label="📥 下載日曆建議表",
+        data=output.getvalue(),
+        file_name=f"LuckyCalendar_{target_year}_{str(target_month).zfill(2)}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
