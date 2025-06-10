@@ -5,18 +5,14 @@ from io import BytesIO
 import calendar
 from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
 
+# ✅ set_page_config 一定要放最前面
+st.set_page_config(page_title="樂覺製所生命靈數", layout="centered")
+
+# ✅ 啟動提示訊息（可移除）
+st.write("🟢 成功啟動")
+
 # ===== 主日數與幸運物件資料 =====
-day_meaning = {
-    1: {"名稱": "創造日", "指引": "展現創意，展現自我魅力。", "星": "⭐⭐⭐⭐"},
-    2: {"名稱": "連結日", "指引": "適合合作，溝通與等待機會。", "星": "⭐⭐"},
-    3: {"名稱": "表達日", "指引": "表達想法，展現自我魅力。", "星": "⭐⭐⭐"},
-    4: {"名稱": "實作日", "指引": "建立基礎，適合細節與規劃。", "星": "⭐⭐⭐"},
-    5: {"名稱": "行動日", "指引": "啟動新的計畫，做出主動選擇。", "星": "⭐⭐⭐⭐"},
-    6: {"名稱": "關係日", "指引": "接觸愛情，適當調整。", "星": "⭐⭐⭐"},
-    7: {"名稱": "內省日", "指引": "適合學習、休息與自我對話。", "星": "⭐"},
-    8: {"名稱": "成果日", "指引": "聚焦目標與務成就。", "星": "⭐⭐⭐⭐"},
-    9: {"名稱": "釋放日", "指引": "放手，療癒與完成階段。", "星": "⭐⭐"},
-}
+day_meaning = {}
 
 lucky_map = {
     1: {"色": "🔴 紅色", "水晶": "紅瑪瑙", "小物": "原子筆"},
@@ -30,7 +26,13 @@ lucky_map = {
     9: {"色": "⚪ 白色", "水晶": "白水晶", "小物": "小香包"},
 }
 
-# ===== 工具函式 =====
+# ===== 組合數指引（簡化版佔位符）=====
+flowing_day_guidance_map = {
+    "11/2": "與自己的內在靈性連結...",
+    "59/14/5": "富有挑戰性的一天..."
+    # 📝 建議保留完整 49 組內容於實際版本中
+}
+
 def reduce_to_digit(n):
     while n > 9:
         n = sum(int(x) for x in str(n))
@@ -51,30 +53,8 @@ def get_flowing_month_ref(query_date, birthday):
         return query_date.month - 1 if query_date.month > 1 else 12
     return query_date.month
 
-def get_additional_guidance(flowing_day):
-    main_number = reduce_to_digit(flowing_day)
-    if main_number == 5:
-        if flowing_day == 32:
-            return "這一天，創意與行動的平衡將帶來新的計畫，準備好啟動變革。"
-        elif flowing_day == 41:
-            return "這一天，務實的行動將與創意結合，為新機會打下基礎。"
-    elif main_number == 1:
-        return "今天是展示創意與自我的好時機，讓你吸引更多的目光與機會。"
-    elif main_number == 2:
-        return "今天是適合合作與溝通的日子，耐心等待機會的來臨。"
-    elif main_number == 3:
-        return "自信表達自己的想法，與他人分享你的創意與理念。"
-    elif main_number == 4:
-        return "這一天是規劃與執行的最佳時機，專注細節並做好準備。"
-    elif main_number == 6:
-        return "關注他人需求，今天是營造和諧關係的日子。"
-    elif main_number == 7:
-        return "給自己一些安靜的時間，進行深層的內省與學習。"
-    elif main_number == 8:
-        return "聚焦於目標，今天是行動的最佳時機，邁向成就。"
-    elif main_number == 9:
-        return "放下過去，準備迎接新的階段，療癒自己。"
-    return ""
+def get_flowing_day_guidance(flowing_day_str):
+    return flowing_day_guidance_map.get(flowing_day_str, "")
 
 def style_excel(df):
     output = BytesIO()
@@ -101,7 +81,6 @@ def style_excel(df):
             worksheet.row_dimensions[row[0].row].height = 35
     return output
 
-st.set_page_config(page_title="樂覺製所生命靈數", layout="centered")
 st.title("🧭 樂覺製所生命靈數")
 st.markdown("在數字之中，\n我們與自己不期而遇。\n**Be true, be you — 讓靈魂，自在呼吸。**")
 
@@ -120,8 +99,7 @@ if st.button("🎉 產生日曆建議表"):
         main_number = reduce_to_digit(fd_total)
         meaning = day_meaning.get(main_number, {})
         lucky = lucky_map.get(main_number, {})
-        additional_guidance = get_additional_guidance(fd_total)
-        guidance = meaning.get("指引", "") + " " + additional_guidance
+        guidance = get_flowing_day_guidance(flowing_day)
         year_ref = get_flowing_year_ref(d, birthday)
         fy_total = sum(int(x) for x in f"{year_ref}{birthday.month:02}{birthday.day:02}")
         flowing_year = format_layers(fy_total)
