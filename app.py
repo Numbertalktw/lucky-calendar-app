@@ -160,7 +160,9 @@ def style_excel(df):
         header_fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
         header_alignment = Alignment(horizontal="center", vertical="center")
         for idx, column in enumerate(df.columns):
-            worksheet.column_dimensions[chr(65 + idx)].width = 15
+            max_length = max((len(str(cell)) for cell in df[column]), default=15)
+            adjusted_width = max(15, min(max_length * 1.2, 100))
+            worksheet.column_dimensions[chr(65 + idx)].width = adjusted_width
         for cell in worksheet[1]:
             cell.font = header_font
             cell.fill = header_fill
