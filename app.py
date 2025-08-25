@@ -30,9 +30,8 @@ def format_layers(total: int) -> str:
 def life_year_number_for_year(birthday: datetime.date, query_year: int) -> tuple[int, int]:
     """
     回傳（今年生日前的流年數, 生日當天起的流年數）
-    規則：
-      - 生日「之前」：基準年 = query_year - 1
-      - 生日「當天起」：基準年 = query_year
+      - 生日前：基準年 = query_year - 1
+      - 生日當天起：基準年 = query_year
     流年 = 基準年 + 出生月 + 出生日（最後縮到個位數）
     """
     before_total = (query_year - 1) + birthday.month + birthday.day
@@ -226,26 +225,26 @@ st.set_page_config(page_title="樂覺製所生命靈數", layout="centered")
 st.title("🧭 樂覺製所生命靈數")
 st.markdown("在數字之中，\n我們與自己不期而遇。\n**Be true, be you — 讓靈魂，自在呼吸。**")
 
-# -------- 區塊 A：流年速算 --------
+# -------- 區塊 A：流年速算（移除年份，只保留生日＋查詢日期） --------
 st.subheader("🌟 流年速算")
-col1, col2, col3 = st.columns([1.2, 0.9, 1.2])
+col1, col2 = st.columns([1.2, 1.2])
 with col1:
-    birthday = st.date_input("請輸入生日", value=datetime.date(1990, 1, 1), min_value=datetime.date(1900, 1, 1))
+    birthday = st.date_input("請輸入生日", value=datetime.date(1990, 1, 1),
+                             min_value=datetime.date(1900, 1, 1))
 with col2:
-    target_year = st.number_input("請選擇年份", min_value=1900, max_value=2100,
-                                  value=datetime.datetime.now().year)
-with col3:
-    ref_date = st.date_input("（可選）查詢日期", value=datetime.date(datetime.datetime.now().year, 12, 31))
+    ref_date = st.date_input("查詢日期", value=datetime.date(datetime.datetime.now().year, 12, 31))
 
 if st.button("計算流年"):
-    before_n, after_n = life_year_number_for_year(birthday, int(target_year))
+    # 當日的流年數
     today_n = life_year_number_for_date(birthday, ref_date)
+    # 參考：今年生日前／生日後
+    before_n, after_n = life_year_number_for_year(birthday, ref_date.year)
 
     st.markdown("### 📊 流年結果")
     st.write(f"**本年流年數（依查詢日期 {ref_date}）：** {today_n}")
     st.caption(f"今年生日前：{before_n} ｜ 生日當天起：{after_n}")
 
-    # --- 流年解讀卡片（依查詢日期對應的流年數） ---
+    # 解讀卡片
     title, challenge, action, stars = get_year_advice(today_n)
     lucky = lucky_map.get(today_n, {})
 
@@ -262,7 +261,6 @@ if st.button("計算流年"):
         """
     )
 
-    # （可選）同場加映：生日前/生日後兩階段的參考解讀
     with st.expander("查看「今年生日前／生日當天起」兩階段的解讀"):
         for label, num in [("今年生日前", before_n), ("生日當天起", after_n)]:
             t, c, a, s = get_year_advice(num)
@@ -278,15 +276,16 @@ if st.button("計算流年"):
                 """
             )
 
-# -------- 區塊 B：流年月曆產生器 --------
+# -------- 區塊 B：流年月曆產生器（以查詢日期的年份為基準） --------
 st.subheader("📅 產生 1 個月份的『流年月曆』建議表")
 target_month = st.selectbox("請選擇月份", list(range(1, 13)), index=datetime.datetime.now().month - 1)
 
 if st.button("🎉 產生日曆建議表"):
+    target_year_for_calendar = ref_date.year  # 以查詢日期的年份為基準
     # 該月天數
-    _, last_day = calendar.monthrange(target_year, target_month)
-    days = pd.date_range(start=datetime.date(target_year, target_month, 1),
-                         end=datetime.date(target_year, target_month, last_day))
+    _, last_day = calendar.monthrange(target_year_for_calendar, target_month)
+    days = pd.date_range(start=datetime.date(target_year_for_calendar, target_month, 1),
+                         end=datetime.date(target_year_for_calendar, target_month, last_day))
     data = []
     for d in days:
         # 流日：以生日年 + 生日月 + 該天日（沿用你的邏輯）
@@ -322,7 +321,7 @@ if st.button("🎉 產生日曆建議表"):
     df = pd.DataFrame(data)
     st.dataframe(df, use_container_width=True)
 
-    file_name = f"LuckyCalendar_{target_year}_{str(target_month).zfill(2)}.xlsx"
+    file_name = f"LuckyCalendar_{target_year_for_calendar}_{str(target_month).zfill(2)}.xlsx"
     title = "樂覺製所生命靈數"
     subtitle = "在數字之中，我們與自己不期而遇。Be true, be you — 讓靈魂，自在呼吸。"
 
