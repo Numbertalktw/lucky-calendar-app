@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import streamlit as st
 import datetime
 import pandas as pd
@@ -5,9 +6,80 @@ from io import BytesIO
 import calendar
 from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
 
-# ===== 主日數與幸運物件資料 =====
-day_meaning = {}
+# =========================
+# 公用數字處理
+# =========================
+def reduce_to_digit(n: int) -> int:
+    """反覆位數相加直到一位數"""
+    while n > 9:
+        n = sum(int(x) for x in str(n))
+    return n
 
+def sum_once(n: int) -> int:
+    """只做一次位數相加"""
+    return sum(int(x) for x in str(n))
+
+def format_layers(total: int) -> str:
+    """輸出三段式（或二段式）顯示"""
+    mid = sum_once(total)
+    return f"{total}/{mid}/{reduce_to_digit(mid)}" if mid > 9 else f"{total}/{mid}"
+
+# =========================
+# 生命靈數：流年計算（以生日為切點）
+# =========================
+def life_year_number_for_year(birthday: datetime.date, query_year: int) -> tuple[int, int]:
+    """
+    回傳（今年生日前的流年數, 生日當天起的流年數）
+      - 生日前：基準年 = query_year - 1
+      - 生日當天起：基準年 = query_year
+    流年 = 基準年 + 出生月 + 出生日（最後縮到個位數）
+    """
+    before_total = (query_year - 1) + birthday.month + birthday.day
+    after_total  = (query_year)     + birthday.month + birthday.day
+    return reduce_to_digit(sum_once(before_total)), reduce_to_digit(sum_once(after_total))
+
+def life_year_number_for_date(birthday: datetime.date, query_date: datetime.date) -> int:
+    """
+    針對某個『查詢日期』回傳當天的流年數：
+      - 若 query_date < 當年生日 → 使用前一年
+      - 其餘 → 使用當年
+    """
+    cutoff = datetime.date(query_date.year, birthday.month, birthday.day)
+    base_year = query_date.year - 1 if query_date < cutoff else query_date.year
+    total = base_year + birthday.month + birthday.day
+    return reduce_to_digit(sum_once(total))
+
+# =========================
+# 流年解說（主題／挑戰／建議／⭐）
+# =========================
+def get_year_advice(n: int):
+    """依流年主數 1–9 回傳：主題、挑戰、建議、星等"""
+    advice = {
+        1: ("自主與突破之年", "容易衝動、單打獨鬥",
+            "設定清晰目標；在決策前先蒐集意見、給自己緩衝時間。", "⭐⭐⭐⭐"),
+        2: ("協作與關係之年", "過度迎合、忽略自我",
+            "練習明確表達需求、建立健康邊界；耐心溝通。", "⭐⭐⭐"),
+        3: ("創意與表達之年", "分心、情緒起伏",
+            "為創作與學習預留固定時段；公開練習表達。", "⭐⭐⭐⭐"),
+        4: ("穩定與基礎之年", "壓力感、僵化完美主義",
+            "用『可持續的小步驟』築基礎；為計畫預留彈性。", "⭐⭐⭐"),
+        5: ("變動與自由之年", "焦躁、衝動決策",
+            "先設安全網再突破；用短衝 (sprint) 測試新方向。", "⭐⭐⭐⭐"),
+        6: ("關懷與責任之年", "過度承擔、忽略自我",
+            "把『照顧自己』寫進行程；清楚承諾與界線。", "⭐⭐⭐"),
+        7: ("內省與學習之年", "孤立、鑽牛角尖",
+            "安排獨處＋定期對談；用寫作/冥想整理解讀。", "⭐⭐⭐"),
+        8: ("事業與財務之年", "過度追求成就、忽略健康情感",
+            "設定績效與復原節奏並行；學會授權與談判。", "⭐⭐⭐⭐"),
+        9: ("收尾與釋放之年", "抗拒結束、情緒回顧",
+            "用感恩做結案；做斷捨離，替新循環清出空間。", "⭐⭐⭐"),
+    }
+    return advice.get(n, ("年度主題", "—", "—", "⭐⭐⭐"))
+
+# =========================
+# 主日數與幸運物件資料（可擴充）
+# =========================
+day_meaning = {}
 lucky_map = {
     1: {"色": "🔴 紅色", "水晶": "紅瑪瑙", "小物": "原子筆"},
     2: {"色": "🟠 橘色", "水晶": "太陽石", "小物": "月亮吊飾"},
@@ -20,7 +92,9 @@ lucky_map = {
     9: {"色": "⚪ 白色", "水晶": "白水晶", "小物": "小香包"},
 }
 
-# ===== 對應組合數指引字典 =====
+# =========================
+# 流日指引 & 星等
+# =========================
 flowing_day_guidance_map = {
     "11/2": "與自己的內在靈性連結，打開心眼從心去看清楚背後的真相。今天適合保持耐心，專注且細膩地與人合作，共創和諧和成長。",
     "12/3": "創意的想法和能量正在湧現，用純粹且動聽的方式傳遞出來。今天是和記錄靈感，或公開向他人表達自己的想法和觀點。",
@@ -73,15 +147,30 @@ flowing_day_guidance_map = {
     "59/14/5": "富有挑戰性的一天，過去所學將在此迎來挑戰、轉化與成長。建議保有靈活的彈性，也需謹慎面對過去未解議題。"
 }
 
-def reduce_to_digit(n):
-    while n > 9:
-        n = sum(int(x) for x in str(n))
-    return n
+def get_flowing_day_guidance(flowing_day_str: str) -> str:
+    return flowing_day_guidance_map.get(flowing_day_str, "")
 
-def format_layers(total):
-    mid = sum(int(x) for x in str(total))
-    return f"{total}/{mid}/{reduce_to_digit(mid)}" if mid > 9 else f"{total}/{mid}"
+def get_flowing_day_star(flowing_day_str: str) -> str:
+    star_map = {
+        "11/2":"🌟🌟","12/3":"🌟🌟🌟🌟","13/4":"🌟🌟🌟🌟","14/5":"🌟🌟",
+        "15/6":"🌟🌟🌟🌟","16/7":"🌟🌟🌟","17/8":"🌟🌟🌟🌟🌟","18/9":"🌟🌟",
+        "19/10/1":"🌟🌟🌟🌟","20/2":"🌟🌟🌟","21/3":"🌟🌟🌟🌟","22/4":"🌟🌟🌟",
+        "23/5":"🌟🌟🌟🌟","24/6":"🌟🌟🌟","25/7":"🌟🌟","26/8":"🌟🌟🌟🌟🌟",
+        "27/9":"🌟🌟🌟","28/10/1":"🌟🌟🌟🌟🌟","29/11/2":"🌟🌟🌟","30/3":"🌟🌟🌟🌟",
+        "31/4":"🌟🌟🌟🌟","32/5":"🌟🌟🌟🌟","33/6":"🌟🌟🌟","34/7":"🌟🌟",
+        "35/8":"🌟🌟🌟🌟🌟","36/9":"🌟🌟🌟🌟","37/10/1":"🌟🌟🌟🌟🌟","38/11/2":"🌟🌟🌟",
+        "39/12/3":"🌟🌟🌟🌟","40/4":"🌟🌟🌟","41/5":"🌟🌟🌟🌟","42/6":"🌟🌟🌟",
+        "43/7":"🌟🌟🌟","44/8":"🌟🌟🌟🌟","45/9":"🌟🌟🌟","46/10/1":"🌟🌟🌟🌟",
+        "47/11/2":"🌟🌟🌟","48/12/3":"🌟🌟🌟🌟","49/13/4":"🌟🌟🌟","50/5":"🌟🌟🌟🌟",
+        "51/6":"🌟🌟","52/7":"🌟🌟🌟","53/8":"🌟🌟🌟🌟","54/9":"🌟🌟",
+        "55/10/1":"🌟🌟🌟","56/11/2":"🌟🌟","57/12/3":"🌟🌟🌟🌟","58/13/4":"🌟🌟🌟",
+        "59/14/5":"🌟🌟🌟🌟🌟"
+    }
+    return star_map.get(flowing_day_str, "🌟🌟🌟")
 
+# =========================
+# 流年 / 流月 參考年與月
+# =========================
 def get_flowing_year_ref(query_date, bday):
     query_date = query_date.date() if hasattr(query_date, "date") else query_date
     cutoff = datetime.date(query_date.year, bday.month, bday.day)
@@ -93,121 +182,132 @@ def get_flowing_month_ref(query_date, birthday):
         return query_date.month - 1 if query_date.month > 1 else 12
     return query_date.month
 
-def get_flowing_day_guidance(flowing_day_str):
-    return flowing_day_guidance_map.get(flowing_day_str, "")
-
-def get_flowing_day_star(flowing_day_str):
-    star_map = {
-        "11/2": "🌟🌟",
-        "12/3": "🌟🌟🌟🌟",
-        "13/4": "🌟🌟🌟🌟",
-        "14/5": "🌟🌟",
-        "15/6": "🌟🌟🌟🌟",
-        "16/7": "🌟🌟🌟",
-        "17/8": "🌟🌟🌟🌟🌟",
-        "18/9": "🌟🌟",
-        "19/10/1": "🌟🌟🌟🌟",
-        "20/2": "🌟🌟🌟",
-        "21/3": "🌟🌟🌟🌟",
-        "22/4": "🌟🌟🌟",
-        "23/5": "🌟🌟🌟🌟",
-        "24/6": "🌟🌟🌟",
-        "25/7": "🌟🌟",
-        "26/8": "🌟🌟🌟🌟🌟",
-        "27/9": "🌟🌟🌟",
-        "28/10/1": "🌟🌟🌟🌟🌟",
-        "29/11/2": "🌟🌟🌟",
-        "30/3": "🌟🌟🌟🌟",
-        "31/4": "🌟🌟🌟🌟",
-        "32/5": "🌟🌟🌟🌟",
-        "33/6": "🌟🌟🌟",
-        "34/7": "🌟🌟",
-        "35/8": "🌟🌟🌟🌟🌟",
-        "36/9": "🌟🌟🌟🌟",
-        "37/10/1": "🌟🌟🌟🌟🌟",
-        "38/11/2": "🌟🌟🌟",
-        "39/12/3": "🌟🌟🌟🌟",
-        "40/4": "🌟🌟🌟",
-        "41/5": "🌟🌟🌟🌟",
-        "42/6": "🌟🌟🌟",
-        "43/7": "🌟🌟🌟",
-        "44/8": "🌟🌟🌟🌟",
-        "45/9": "🌟🌟🌟",
-        "46/10/1": "🌟🌟🌟🌟",
-        "47/11/2": "🌟🌟🌟",
-        "48/12/3": "🌟🌟🌟🌟",
-        "49/13/4": "🌟🌟🌟",
-        "50/5": "🌟🌟🌟🌟",
-        "51/6": "🌟🌟",
-        "52/7": "🌟🌟🌟",
-        "53/8": "🌟🌟🌟🌟",
-        "54/9": "🌟🌟",
-        "55/10/1": "🌟🌟🌟",
-        "56/11/2": "🌟🌟",
-        "57/12/3": "🌟🌟🌟🌟",
-        "58/13/4": "🌟🌟🌟",
-        "59/14/5": "🌟🌟🌟🌟🌟"
-    }
-    return star_map.get(flowing_day_str, "🌟🌟🌟")
-
-def style_excel(df):
+# =========================
+# 匯出 Excel 樣式
+# =========================
+def style_excel(df: pd.DataFrame) -> BytesIO:
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name="流年月曆")
         workbook = writer.book
         worksheet = workbook["流年月曆"]
+
         header_font = Font(size=12, bold=True, color="FFFFFF")
         header_fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
         header_alignment = Alignment(horizontal="center", vertical="center")
+
+        # 欄寬
         for idx, column in enumerate(df.columns):
             max_length = max((len(str(cell)) for cell in df[column]), default=15)
-            adjusted_width = max(15, min(max_length * 1.2, 100))
+            adjusted_width = max(15, min(int(max_length * 1.2), 100))
             worksheet.column_dimensions[chr(65 + idx)].width = adjusted_width
+
+        # 表頭樣式
         for cell in worksheet[1]:
             cell.font = header_font
             cell.fill = header_fill
             cell.alignment = header_alignment
+
         thin_border = Border(left=Side(style='thin'), right=Side(style='thin'),
                              top=Side(style='thin'), bottom=Side(style='thin'))
+
         for row in worksheet.iter_rows():
             for cell in row:
                 cell.border = thin_border
                 cell.alignment = Alignment(horizontal="center", vertical="center")
-        for row in worksheet.iter_rows():
             worksheet.row_dimensions[row[0].row].height = 35
     return output
 
+# =========================
+# Streamlit 介面
+# =========================
 st.set_page_config(page_title="樂覺製所生命靈數", layout="centered")
 st.title("🧭 樂覺製所生命靈數")
 st.markdown("在數字之中，\n我們與自己不期而遇。\n**Be true, be you — 讓靈魂，自在呼吸。**")
 
-birthday = st.date_input("請輸入生日", value=datetime.date(1990, 1, 1), min_value=datetime.date(1900, 1, 1))
-target_year = st.number_input("請選擇年份", min_value=1900, max_value=2100, value=datetime.datetime.now().year)
+# -------- 區塊 A：流年速算（移除年份，只保留生日＋查詢日期） --------
+st.subheader("🌟 流年速算")
+col1, col2 = st.columns([1.2, 1.2])
+with col1:
+    birthday = st.date_input("請輸入生日", value=datetime.date(1990, 1, 1),
+                             min_value=datetime.date(1900, 1, 1))
+with col2:
+    ref_date = st.date_input("查詢日期", value=datetime.date(datetime.datetime.now().year, 12, 31))
+
+if st.button("計算流年"):
+    # 當日的流年數
+    today_n = life_year_number_for_date(birthday, ref_date)
+    # 參考：今年生日前／生日後
+    before_n, after_n = life_year_number_for_year(birthday, ref_date.year)
+
+    st.markdown("### 📊 流年結果")
+    st.write(f"**本年流年數（依查詢日期 {ref_date}）：** {today_n}")
+    st.caption(f"今年生日前：{before_n} ｜ 生日當天起：{after_n}")
+
+    # 解讀卡片
+    title, challenge, action, stars = get_year_advice(today_n)
+    lucky = lucky_map.get(today_n, {})
+
+    st.markdown("#### 🪄 流年解說（依目前查詢日）")
+    st.markdown(
+        f"""
+**主題**：{title}  
+**年度運勢指數**：{stars}  
+**可能挑戰**：{challenge}  
+**建議行動**：{action}  
+
+**幸運顏色**：{lucky.get('色','')}  
+**建議水晶**：{lucky.get('水晶','')}
+        """
+    )
+
+    with st.expander("查看「今年生日前／生日當天起」兩階段的解讀"):
+        for label, num in [("今年生日前", before_n), ("生日當天起", after_n)]:
+            t, c, a, s = get_year_advice(num)
+            lk = lucky_map.get(num, {})
+            st.markdown(
+                f"""
+**{label} → 流年數 {num}**  
+• 主題：{t}  
+• ⭐：{s}  
+• 挑戰：{c}  
+• 建議：{a}  
+• 幸運色 / 水晶：{lk.get('色','')} / {lk.get('水晶','')}
+                """
+            )
+
+# -------- 區塊 B：流年月曆產生器（以查詢日期的年份為基準） --------
+st.subheader("📅 產生 1 個月份的『流年月曆』建議表")
 target_month = st.selectbox("請選擇月份", list(range(1, 13)), index=datetime.datetime.now().month - 1)
 
 if st.button("🎉 產生日曆建議表"):
-    _, last_day = calendar.monthrange(target_year, target_month)
-    days = pd.date_range(start=datetime.date(target_year, target_month, 1),
-                         end=datetime.date(target_year, target_month, last_day))
+    target_year_for_calendar = ref_date.year  # 以查詢日期的年份為基準
+    # 該月天數
+    _, last_day = calendar.monthrange(target_year_for_calendar, target_month)
+    days = pd.date_range(start=datetime.date(target_year_for_calendar, target_month, 1),
+                         end=datetime.date(target_year_for_calendar, target_month, last_day))
     data = []
     for d in days:
+        # 流日：以生日年 + 生日月 + 該天日（沿用你的邏輯）
         fd_total = sum(int(x) for x in f"{birthday.year}{birthday.month:02}{d.day:02}")
         flowing_day = format_layers(fd_total)
         main_number = reduce_to_digit(fd_total)
-        meaning = day_meaning.get(main_number, {})
         lucky = lucky_map.get(main_number, {})
         guidance = get_flowing_day_guidance(flowing_day)
+
+        # 流年（參考年）：以「該天日期」是否已過生日來決定基準年
         year_ref = get_flowing_year_ref(d, birthday)
         fy_total = sum(int(x) for x in f"{year_ref}{birthday.month:02}{birthday.day:02}")
         flowing_year = format_layers(fy_total)
+
+        # 流月（參考月）：若尚未到生日當日，用上個月為參考
         fm_ref = get_flowing_month_ref(d, birthday)
         fm_total = sum(int(x) for x in f"{birthday.year}{fm_ref:02}{birthday.day:02}")
         flowing_month = format_layers(fm_total)
-        date_str = d.strftime("%Y-%m-%d")
-        weekday_str = d.strftime("%A")
+
         data.append({
-            "日期": date_str,
-            "星期": weekday_str,
+            "日期": d.strftime("%Y-%m-%d"),
+            "星期": d.strftime("%A"),
             "流年": flowing_year,
             "流月": flowing_month,
             "流日": flowing_day,
@@ -217,11 +317,14 @@ if st.button("🎉 產生日曆建議表"):
             "水晶": lucky.get("水晶", ""),
             "幸運小物": lucky.get("小物", "")
         })
+
     df = pd.DataFrame(data)
-    st.dataframe(df)
-    file_name = f"LuckyCalendar_{target_year}_{str(target_month).zfill(2)}.xlsx"
+    st.dataframe(df, use_container_width=True)
+
+    file_name = f"LuckyCalendar_{target_year_for_calendar}_{str(target_month).zfill(2)}.xlsx"
     title = "樂覺製所生命靈數"
     subtitle = "在數字之中，我們與自己不期而遇。Be true, be you — 讓靈魂，自在呼吸。"
+
     if not df.empty and df.dropna(how='all').shape[0] > 0:
         output = style_excel(df)
         st.markdown(f"### {title}")
