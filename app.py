@@ -262,10 +262,17 @@ st.markdown("在數字之中，\n我們與自己不期而遇。\n**Be true, be y
 st.subheader("🌟 生命靈數 & 流年速算")
 col1, col2 = st.columns([1.2, 1.2])
 with col1:
-    birthday = st.date_input("請輸入生日", value=datetime.date(1990, 1, 1),
-                             min_value=datetime.date(1900, 1, 1))
+    # 設定 max_value 為 2100 年，解決無法選擇較新年份的問題
+    birthday = st.date_input("請輸入生日", 
+                             value=datetime.date(1990, 1, 1),
+                             min_value=datetime.date(1900, 1, 1),
+                             max_value=datetime.date(2100, 12, 31))
 with col2:
-    ref_date = st.date_input("查詢日期", value=datetime.date(datetime.datetime.now().year, 12, 31))
+    # 查詢日期同樣放寬範圍
+    ref_date = st.date_input("查詢日期", 
+                             value=datetime.date(datetime.datetime.now().year, 12, 31),
+                             min_value=datetime.date(1900, 1, 1),
+                             max_value=datetime.date(2100, 12, 31))
 
 if st.button("計算靈數與流年"):
     # 1. 先計算並顯示生命靈數（主命數）
