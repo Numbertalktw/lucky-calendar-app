@@ -1,5 +1,3 @@
-
-
 # -*- coding: utf-8 -*-
 import streamlit as st
 import datetime
@@ -25,6 +23,37 @@ def format_layers(total: int) -> str:
     """輸出三段式（或二段式）顯示"""
     mid = sum_once(total)
     return f"{total}/{mid}/{reduce_to_digit(mid)}" if mid > 9 else f"{total}/{mid}"
+
+# =========================
+# 新增功能：生命靈數主命數計算
+# =========================
+def calculate_life_path_number(birthday: datetime.date) -> tuple[int, int, str]:
+    """
+    計算生命靈數主命數
+    邏輯：1999/10/26 -> 1+9+9+9+1+0+2+6 = 37 -> 3+7=10 -> 1
+    回傳：(主命數, 第一階段總和, 計算過程字串)
+    """
+    # 1. 將年月日轉為純數字字串 "19991026"
+    date_str = birthday.strftime("%Y%m%d")
+    
+    # 2. 第一階段加總 (例如 37)
+    total_sum = sum(int(char) for char in date_str)
+    
+    # 3. 縮減至個位數 (例如 1)
+    final_num = reduce_to_digit(total_sum)
+    
+    # 過程字串 (僅供顯示用)
+    process_str = f"{total_sum} → {final_num}"
+    if total_sum != final_num and total_sum > 9:
+        # 如果中間還有例如 37 -> 10 -> 1 的過程，這裡簡單顯示頭尾
+        # 若要顯示 10，可再做一次 sum_once
+        second_step = sum_once(total_sum)
+        if second_step > 9 and second_step != final_num:
+             process_str = f"{total_sum} → {second_step} → {final_num}"
+        else:
+             process_str = f"{total_sum} → {final_num}"
+
+    return final_num, total_sum, process_str
 
 # =========================
 # 生命靈數：流年計算（以生日為切點）
@@ -230,7 +259,7 @@ st.title("🧭 樂覺製所生命靈數")
 st.markdown("在數字之中，\n我們與自己不期而遇。\n**Be true, be you — 讓靈魂，自在呼吸。**")
 
 # -------- 區塊 A：流年速算（移除年份，只保留生日＋查詢日期） --------
-st.subheader("🌟 流年速算")
+st.subheader("🌟 生命靈數 & 流年速算")
 col1, col2 = st.columns([1.2, 1.2])
 with col1:
     birthday = st.date_input("請輸入生日", value=datetime.date(1990, 1, 1),
@@ -238,7 +267,22 @@ with col1:
 with col2:
     ref_date = st.date_input("查詢日期", value=datetime.date(datetime.datetime.now().year, 12, 31))
 
-if st.button("計算流年"):
+if st.button("計算靈數與流年"):
+    # 1. 先計算並顯示生命靈數（主命數）
+    life_num, life_sum, life_process = calculate_life_path_number(birthday)
+    lucky_life = lucky_map.get(life_num, {})
+
+    st.markdown("---")
+    st.subheader(f"🔮 您的生命靈數主命數：【 {life_num} 】號人")
+    st.caption(f"計算公式：將西元生日數字全部加總 ({birthday.strftime('%Y/%m/%d')})")
+    st.text(f"計算過程：{life_sum} → {life_process}")
+    
+    # 顯示該命數的幸運物 (共用 lucky_map)
+    if lucky_life:
+         st.info(f"✨ **幸運色**：{lucky_life.get('色')} ｜ **水晶**：{lucky_life.get('水晶')} ｜ **小物**：{lucky_life.get('小物')}")
+    st.markdown("---")
+
+    # 2. 計算流年 (原有邏輯)
     # 當日的流年數
     today_n = life_year_number_for_date(birthday, ref_date)
     # 參考：今年生日前／生日後
@@ -250,7 +294,7 @@ if st.button("計算流年"):
 
     # 解讀卡片
     title, challenge, action, stars = get_year_advice(today_n)
-    lucky = lucky_map.get(today_n, {})
+    lucky_year = lucky_map.get(today_n, {})
 
     st.markdown("#### 🪄 流年解說（依目前查詢日）")
     st.markdown(
@@ -260,8 +304,8 @@ if st.button("計算流年"):
 **可能挑戰**：{challenge}  
 **建議行動**：{action}  
 
-**幸運顏色**：{lucky.get('色','')}  
-**建議水晶**：{lucky.get('水晶','')}
+**幸運顏色**：{lucky_year.get('色','')}  
+**建議水晶**：{lucky_year.get('水晶','')}
         """
     )
 
@@ -271,8 +315,7 @@ if st.button("計算流年"):
             lk = lucky_map.get(num, {})
             st.markdown(
                 f"""
-**{label} → 流年數 {num}**  
-• 主題：{t}  
+**{label} → 流年數 {num}** • 主題：{t}  
 • ⭐：{s}  
 • 挑戰：{c}  
 • 建議：{a}  
