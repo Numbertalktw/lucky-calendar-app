@@ -4,7 +4,46 @@ import datetime
 import pandas as pd
 from io import BytesIO
 import calendar
+import sqlite3  # 新增：用於資料庫
 from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
+
+# =========================
+# 資料庫功能 (Backend Stats)
+# =========================
+DB_FILE = 'stats.db'
+
+def init_db():
+    """初始化資料庫"""
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    # 建立下載紀錄表
+    c.execute('''CREATE TABLE IF NOT EXISTS downloads 
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                  timestamp DATETIME DEFAULT CURRENT_TIMESTAMP, 
+                  filename TEXT)''')
+    conn.commit()
+    conn.close()
+
+def log_download(filename):
+    """記錄下載事件 (Callback)"""
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("INSERT INTO downloads (filename) VALUES (?)", (filename,))
+    conn.commit()
+    conn.close()
+    # 可以在這裡加一行 st.toast 通知管理員（選用）
+    # st.toast(f"New download recorded: {filename}")
+
+def get_download_stats():
+    """讀取下載數據"""
+    conn = sqlite3.connect(DB_FILE)
+    # 讀取所有資料
+    df = pd.read_sql_query("SELECT timestamp, filename FROM downloads ORDER BY timestamp DESC", conn)
+    conn.close()
+    return df
+
+# 初始化資料庫
+init_db()
 
 # =========================
 # 公用數字處理
@@ -33,20 +72,12 @@ def calculate_life_path_number(birthday: datetime.date) -> tuple[int, int, str]:
     邏輯：1999/10/26 -> 1+9+9+9+1+0+2+6 = 37 -> 3+7=10 -> 1
     回傳：(主命數, 第一階段總和, 計算過程字串)
     """
-    # 1. 將年月日轉為純數字字串 "19991026"
     date_str = birthday.strftime("%Y%m%d")
-    
-    # 2. 第一階段加總 (例如 37)
     total_sum = sum(int(char) for char in date_str)
-    
-    # 3. 縮減至個位數 (例如 1)
     final_num = reduce_to_digit(total_sum)
     
-    # 過程字串 (僅供顯示用)
     process_str = f"{total_sum} → {final_num}"
     if total_sum != final_num and total_sum > 9:
-        # 如果中間還有例如 37 -> 10 -> 1 的過程，這裡簡單顯示頭尾
-        # 若要顯示 10，可再做一次 sum_once
         second_step = sum_once(total_sum)
         if second_step > 9 and second_step != final_num:
              process_str = f"{total_sum} → {second_step} → {final_num}"
@@ -56,35 +87,23 @@ def calculate_life_path_number(birthday: datetime.date) -> tuple[int, int, str]:
     return final_num, total_sum, process_str
 
 # =========================
-# 生命靈數：流年計算（以生日為切點）
+# 生命靈數：流年計算
 # =========================
 def life_year_number_for_year(birthday: datetime.date, query_year: int) -> tuple[int, int]:
-    """
-    回傳（今年生日前的流年數, 生日當天起的流年數）
-      - 生日前：基準年 = query_year - 1
-      - 生日當天起：基準年 = query_year
-    流年 = 基準年 + 出生月 + 出生日（最後縮到個位數）
-    """
     before_total = (query_year - 1) + birthday.month + birthday.day
     after_total  = (query_year)     + birthday.month + birthday.day
     return reduce_to_digit(sum_once(before_total)), reduce_to_digit(sum_once(after_total))
 
 def life_year_number_for_date(birthday: datetime.date, query_date: datetime.date) -> int:
-    """
-    針對某個『查詢日期』回傳當天的流年數：
-      - 若 query_date < 當年生日 → 使用前一年
-      - 其餘 → 使用當年
-    """
     cutoff = datetime.date(query_date.year, birthday.month, birthday.day)
     base_year = query_date.year - 1 if query_date < cutoff else query_date.year
     total = base_year + birthday.month + birthday.day
     return reduce_to_digit(sum_once(total))
 
 # =========================
-# 流年解說（主題／挑戰／建議／⭐）
+# 流年解說
 # =========================
 def get_year_advice(n: int):
-    """依流年主數 1–9 回傳：主題、挑戰、建議、星等"""
     advice = {
         1: ("自主與突破之年 (Year of Autonomy & Breakthrough)", 
             "容易衝動、單打獨鬥 (Impulsive, fighting alone)",
@@ -126,10 +145,8 @@ def get_year_advice(n: int):
     return advice.get(n, ("年度主題 (Theme)", "—", "—", "⭐⭐⭐"))
 
 # =========================
-# 主日數與幸運物件資料（可擴充）
+# 幸運物件資料
 # =========================
-day_meaning = {}
-
 lucky_map = {
     1: {"色": "🔴 紅色 (Red)", "水晶": "紅瑪瑙、石榴石 (Red Agate, Garnet)", "小物": "原子筆 (Pen)"},
     2: {"色": "🟠 橙色 (Orange)", "水晶": "太陽石、橙月光 (Sunstone, Orange Moonstone)", "小物": "月亮吊飾 (Moon Charm)"},
@@ -219,9 +236,6 @@ def get_flowing_day_star(flowing_day_str: str) -> str:
     }
     return star_map.get(flowing_day_str, "🌟🌟🌟")
 
-# =========================
-# 流年 / 流月 參考年與月
-# =========================
 def get_flowing_year_ref(query_date, bday):
     query_date = query_date.date() if hasattr(query_date, "date") else query_date
     cutoff = datetime.date(query_date.year, bday.month, bday.day)
@@ -242,26 +256,19 @@ def style_excel(df: pd.DataFrame) -> BytesIO:
         df.to_excel(writer, index=False, sheet_name="流年月曆")
         workbook = writer.book
         worksheet = workbook["流年月曆"]
-
         header_font = Font(size=12, bold=True, color="FFFFFF")
         header_fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
         header_alignment = Alignment(horizontal="center", vertical="center")
-
-        # 欄寬
         for idx, column in enumerate(df.columns):
             max_length = max((len(str(cell)) for cell in df[column]), default=15)
             adjusted_width = max(15, min(int(max_length * 1.2), 100))
             worksheet.column_dimensions[chr(65 + idx)].width = adjusted_width
-
-        # 表頭樣式
         for cell in worksheet[1]:
             cell.font = header_font
             cell.fill = header_fill
             cell.alignment = header_alignment
-
         thin_border = Border(left=Side(style='thin'), right=Side(style='thin'),
                              top=Side(style='thin'), bottom=Side(style='thin'))
-
         for row in worksheet.iter_rows():
             for cell in row:
                 cell.border = thin_border
@@ -276,109 +283,69 @@ st.set_page_config(page_title="樂覺製所生命靈數 | Numerology", layout="c
 st.title("🧭 樂覺製所生命靈數")
 st.markdown("在數字之中，我們與自己不期而遇。\n(In numbers, we meet ourselves unexpectedly.)\n\n**Be true, be you — 讓靈魂，自在呼吸。(Let the soul breathe freely.)**")
 
-# -------- 區塊 A：流年速算（移除年份，只保留生日＋查詢日期） --------
+# -------- 區塊 A：流年速算 --------
 st.subheader("🌟 生命靈數 & 流年速算 (Life Path & Yearly Flow)")
 col1, col2 = st.columns([1.2, 1.2])
 with col1:
-    # 設定 max_value 為 2100 年
     birthday = st.date_input("請輸入生日 (Birthday)", 
                              value=datetime.date(1990, 1, 1),
                              min_value=datetime.date(1900, 1, 1),
                              max_value=datetime.date(2100, 12, 31))
 with col2:
-    # 查詢日期同樣放寬範圍
     ref_date = st.date_input("查詢日期 (Query Date)", 
                              value=datetime.date(datetime.datetime.now().year, 12, 31),
                              min_value=datetime.date(1900, 1, 1),
                              max_value=datetime.date(2100, 12, 31))
 
 if st.button("計算靈數與流年 (Calculate)"):
-    # 1. 先計算並顯示生命靈數（主命數）
     life_num, life_sum, life_process = calculate_life_path_number(birthday)
     lucky_life = lucky_map.get(life_num, {})
-
     st.markdown("---")
     st.subheader(f"🔮 您的生命靈數主命數：【 {life_num} 】號人")
     st.caption(f"Life Path Number: {life_num}")
     st.caption(f"計算公式 (Formula)：將西元生日數字全部加總 ({birthday.strftime('%Y/%m/%d')})")
     st.text(f"計算過程 (Calculation)：{life_sum} → {life_process}")
-    
-    # 顯示該命數的幸運物 (共用 lucky_map)
     if lucky_life:
          st.info(f"✨ **幸運色 (Color)**：{lucky_life.get('色')} ｜ **水晶 (Crystal)**：{lucky_life.get('水晶')} ｜ **小物 (Item)**：{lucky_life.get('小物')}")
     st.markdown("---")
-
-    # 2. 計算流年 (原有邏輯)
-    # 當日的流年數
     today_n = life_year_number_for_date(birthday, ref_date)
-    # 參考：今年生日前／生日後
     before_n, after_n = life_year_number_for_year(birthday, ref_date.year)
-
     st.markdown("### 📊 流年結果 (Yearly Flow Result)")
     st.write(f"**本年流年數（依查詢日期 {ref_date}）：** {today_n}")
     st.caption(f"Current Year Number (based on query date): {today_n}")
     st.caption(f"今年生日前 (Before Birthday): {before_n} ｜ 生日當天起 (After Birthday): {after_n}")
-
-    # 解讀卡片
     title, challenge, action, stars = get_year_advice(today_n)
     lucky_year = lucky_map.get(today_n, {})
-
     st.markdown("#### 🪄 流年解說 (Guidance for the Year)")
-    st.markdown(
-        f"""
-**主題 (Theme)**：{title}  
-**運勢指數 (Stars)**：{stars}  
-**挑戰 (Challenge)**：{challenge}  
-**建議行動 (Action)**：{action}  
-
-**幸運顏色 (Color)**：{lucky_year.get('色','')}  
-**建議水晶 (Crystal)**：{lucky_year.get('水晶','')}
-        """
-    )
-
+    st.markdown(f"**主題 (Theme)**：{title} \n**運勢指數 (Stars)**：{stars} \n**挑戰 (Challenge)**：{challenge} \n**建議行動 (Action)**：{action} \n\n**幸運顏色 (Color)**：{lucky_year.get('色','')} \n**建議水晶 (Crystal)**：{lucky_year.get('水晶','')}")
     with st.expander("查看「今年生日前／生日當天起」兩階段的解讀 (View detailed breakdown)"):
         for label_ch, label_en, num in [("今年生日前", "Before Birthday", before_n), ("生日當天起", "After Birthday", after_n)]:
             t, c, a, s = get_year_advice(num)
             lk = lucky_map.get(num, {})
-            st.markdown(
-                f"""
-**{label_ch} ({label_en}) → 流年數 {num}** • 主題 (Theme)：{t}  
-• ⭐：{s}  
-• 挑戰 (Challenge)：{c}  
-• 建議 (Advice)：{a}  
-• 幸運色 / 水晶 (Color/Crystal)：{lk.get('色','')} / {lk.get('水晶','')}
-                """
-            )
+            st.markdown(f"**{label_ch} ({label_en}) → 流年數 {num}** • 主題 (Theme)：{t} \n• ⭐：{s} \n• 挑戰 (Challenge)：{c} \n• 建議 (Advice)：{a} \n• 幸運色 / 水晶 (Color/Crystal)：{lk.get('色','')} / {lk.get('水晶','')}")
 
-# -------- 區塊 B：流年月曆產生器（以查詢日期的年份為基準） --------
+# -------- 區塊 B：流年月曆產生器 --------
 st.subheader("📅 產生 1 個月份的『流年月曆』建議表 (Generate Monthly Calendar)")
 target_month = st.selectbox("請選擇月份 (Select Month)", list(range(1, 13)), index=datetime.datetime.now().month - 1)
 
 if st.button("🎉 產生日曆建議表 (Generate Excel)"):
-    target_year_for_calendar = ref_date.year  # 以查詢日期的年份為基準
-    # 該月天數
+    target_year_for_calendar = ref_date.year
     _, last_day = calendar.monthrange(target_year_for_calendar, target_month)
     days = pd.date_range(start=datetime.date(target_year_for_calendar, target_month, 1),
                          end=datetime.date(target_year_for_calendar, target_month, last_day))
     data = []
     for d in days:
-        # 流日：以生日年 + 生日月 + 該天日（沿用你的邏輯）
         fd_total = sum(int(x) for x in f"{birthday.year}{birthday.month:02}{d.day:02}")
         flowing_day = format_layers(fd_total)
         main_number = reduce_to_digit(fd_total)
         lucky = lucky_map.get(main_number, {})
         guidance = get_flowing_day_guidance(flowing_day)
-
-        # 流年（參考年）：以「該天日期」是否已過生日來決定基準年
         year_ref = get_flowing_year_ref(d, birthday)
         fy_total = sum(int(x) for x in f"{year_ref}{birthday.month:02}{birthday.day:02}")
         flowing_year = format_layers(fy_total)
-
-        # 流月（參考月）：若尚未到生日當日，用上個月為參考
         fm_ref = get_flowing_month_ref(d, birthday)
         fm_total = sum(int(x) for x in f"{birthday.year}{fm_ref:02}{birthday.day:02}")
         flowing_month = format_layers(fm_total)
-
         data.append({
             "日期 (Date)": d.strftime("%Y-%m-%d"),
             "星期 (Day)": d.strftime("%A"),
@@ -394,20 +361,42 @@ if st.button("🎉 產生日曆建議表 (Generate Excel)"):
 
     df = pd.DataFrame(data)
     st.dataframe(df, use_container_width=True)
-
     file_name = f"LuckyCalendar_{target_year_for_calendar}_{str(target_month).zfill(2)}.xlsx"
-    title = "樂覺製所生命靈數"
-    subtitle = "在數字之中，我們與自己不期而遇。Be true, be you — 讓靈魂，自在呼吸。"
-
-    if not df.empty and df.dropna(how='all').shape[0] > 0:
+    if not df.empty:
         output = style_excel(df)
-        st.markdown(f"### {title}")
-        st.markdown(f"**{subtitle}**")
+        st.markdown(f"### 樂覺製所生命靈數")
+        # 下載按鈕加上回呼函式來計算下載次數
         st.download_button(
-            "📥 點此下載 Excel (Download)",
+            label="📥 點此下載 Excel (Download)",
             data=output.getvalue(),
             file_name=file_name,
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            on_click=log_download,
+            args=(file_name,)
         )
     else:
         st.warning("⚠️ 無法匯出 Excel：目前資料為空 (No data to export)")
+
+# =========================
+# 後台管理區 (側邊欄)
+# =========================
+st.sidebar.markdown("---")
+st.sidebar.subheader("🔒 管理員專區 (Admin)")
+admin_password = st.sidebar.text_input("輸入密碼查看統計 (Password)", type="password")
+
+if admin_password == "admin123":  # 預設密碼，可自行修改
+    st.sidebar.success("已登入 (Logged in)")
+    stats_df = get_download_stats()
+    
+    st.sidebar.write(f"📥 總下載次數: **{len(stats_df)}**")
+    
+    if not stats_df.empty:
+        with st.sidebar.expander("查看詳細紀錄"):
+            st.dataframe(stats_df)
+            
+        # 選用：清空紀錄按鈕
+        # if st.sidebar.button("清空紀錄"):
+        #     # 執行 DELETE SQL...
+        #     pass
+elif admin_password:
+    st.sidebar.error("密碼錯誤 (Wrong Password)")
