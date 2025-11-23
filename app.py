@@ -381,11 +381,14 @@ if st.button("🎉 產生日曆建議表 (Generate Excel)"):
 # 後台管理區 (側邊欄)
 # =========================
 st.sidebar.markdown("---")
-st.sidebar.subheader("🔒 管理員專區 (Admin)")
+# 修改標題，只保留中文
+st.sidebar.subheader("🔒 管理員專區")
 
+# 恢復密碼輸入框
+admin_password = st.sidebar.text_input("輸入密碼", type="password")
 
-if admin_password == "admin123":  # 預設密碼，可自行修改
-    st.sidebar.success("已登入 (Logged in)")
+if admin_password == "admin123":  # 預設密碼
+    st.sidebar.success("已登入")
     stats_df = get_download_stats()
     
     st.sidebar.write(f"📥 總下載次數: **{len(stats_df)}**")
@@ -393,10 +396,5 @@ if admin_password == "admin123":  # 預設密碼，可自行修改
     if not stats_df.empty:
         with st.sidebar.expander("查看詳細紀錄"):
             st.dataframe(stats_df)
-            
-        # 選用：清空紀錄按鈕
-        # if st.sidebar.button("清空紀錄"):
-        #     # 執行 DELETE SQL...
-        #     pass
 elif admin_password:
-    st.sidebar.error("密碼錯誤 (Wrong Password)")
+    st.sidebar.error("密碼錯誤")
