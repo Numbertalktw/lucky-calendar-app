@@ -21,6 +21,10 @@ def init_db():
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, 
                   timestamp DATETIME DEFAULT CURRENT_TIMESTAMP, 
                   filename TEXT)''')
+    # 建立瀏覽紀錄表 (新增)
+    c.execute('''CREATE TABLE IF NOT EXISTS visits 
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                  timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)''')
     conn.commit()
     conn.close()
 
@@ -31,19 +35,41 @@ def log_download(filename):
     c.execute("INSERT INTO downloads (filename) VALUES (?)", (filename,))
     conn.commit()
     conn.close()
-    # 可以在這裡加一行 st.toast 通知管理員（選用）
-    # st.toast(f"New download recorded: {filename}")
+
+def log_visit():
+    """記錄瀏覽事件"""
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("INSERT INTO visits (timestamp) VALUES (CURRENT_TIMESTAMP)")
+    conn.commit()
+    conn.close()
 
 def get_download_stats():
     """讀取下載數據"""
     conn = sqlite3.connect(DB_FILE)
-    # 讀取所有資料
     df = pd.read_sql_query("SELECT timestamp, filename FROM downloads ORDER BY timestamp DESC", conn)
+    conn.close()
+    return df
+
+def get_visit_stats():
+    """讀取瀏覽數據"""
+    conn = sqlite3.connect(DB_FILE)
+    df = pd.read_sql_query("SELECT timestamp FROM visits ORDER BY timestamp DESC", conn)
     conn.close()
     return df
 
 # 初始化資料庫
 init_db()
+
+# =========================
+# Streamlit 設定與瀏覽計數
+# =========================
+st.set_page_config(page_title="樂覺製所生命靈數 | Numerology", layout="centered")
+
+# 瀏覽計數邏輯：使用 session_state 避免同一工作階段重複計算
+if 'has_visited' not in st.session_state:
+    log_visit()
+    st.session_state['has_visited'] = True
 
 # =========================
 # 公用數字處理
@@ -107,39 +133,39 @@ def get_year_advice(n: int):
     advice = {
         1: ("自主與突破之年 (Year of Autonomy & Breakthrough)", 
             "容易衝動、單打獨鬥 (Impulsive, fighting alone)",
-            "設定清晰目標；在決策前先蒐集意見、給自己緩衝時間。\n(Set clear goals; gather opinions and allow buffer time before decisions.)", 
+            "設定清晰目標；在決策前先蒐集意見、給自己緩衝時間。", 
             "⭐⭐⭐⭐"),
         2: ("協作與關係之年 (Year of Collaboration & Relationships)", 
             "過度迎合、忽略自我 (Over-accommodating, ignoring self)",
-            "練習明確表達需求、建立健康邊界；耐心溝通。\n(Practice expressing needs, setting boundaries; communicate with patience.)", 
+            "練習明確表達需求、建立健康邊界；耐心溝通。", 
             "⭐⭐⭐"),
         3: ("創意與表達之年 (Year of Creativity & Expression)", 
             "分心、情緒起伏 (Distracted, emotional fluctuations)",
-            "為創作與學習預留固定時段；公開練習表達。\n(Schedule time for creation/learning; practice public expression.)", 
+            "為創作與學習預留固定時段；公開練習表達。", 
             "⭐⭐⭐⭐"),
         4: ("穩定與基礎之年 (Year of Stability & Foundation)", 
             "壓力感、僵化完美主義 (Stress, rigid perfectionism)",
-            "用『可持續的小步驟』築基礎；為計畫預留彈性。\n(Build foundation with sustainable small steps; allow flexibility.)", 
+            "用『可持續的小步驟』築基礎；為計畫預留彈性。", 
             "⭐⭐⭐"),
         5: ("變動與自由之年 (Year of Change & Freedom)", 
             "焦躁、衝動決策 (Restless, impulsive decisions)",
-            "先設安全網再突破；用短衝 (sprint) 測試新方向。\n(Set safety nets before breaking through; test new directions with sprints.)", 
+            "先設安全網再突破；用短衝 (sprint) 測試新方向。", 
             "⭐⭐⭐⭐"),
         6: ("關懷與責任之年 (Year of Care & Responsibility)", 
             "過度承擔、忽略自我 (Over-burdened, self-neglect)",
-            "把『照顧自己』寫進行程；清楚承諾與界線。\n(Schedule 'self-care'; be clear about commitments and boundaries.)", 
+            "把『照顧自己』寫進行程；清楚承諾與界線。", 
             "⭐⭐⭐"),
         7: ("內省與學習之年 (Year of Introspection & Learning)", 
             "孤立、鑽牛角尖 (Isolation, overthinking)",
-            "安排獨處＋定期對談；用寫作/冥想整理解讀。\n(Plan solitude + regular talks; organize thoughts via writing/meditation.)", 
+            "安排獨處＋定期對談；用寫作/冥想整理解讀。", 
             "⭐⭐⭐"),
         8: ("事業與財務之年 (Year of Career & Finance)", 
             "過度追求成就、忽略健康情感 (Over-achieving, ignoring health/emotions)",
-            "設定績效與復原節奏並行；學會授權與談判。\n(Balance performance with recovery; learn to delegate and negotiate.)", 
+            "設定績效與復原節奏並行；學會授權與談判。", 
             "⭐⭐⭐⭐"),
         9: ("收尾與釋放之年 (Year of Completion & Release)", 
             "抗拒結束、情緒回顧 (Resisting endings, emotional nostalgia)",
-            "用感恩做結案；做斷捨離，替新循環清出空間。\n(Conclude with gratitude; declutter to make space for the new cycle.)", 
+            "用感恩做結案；做斷捨離，替新循環清出空間。", 
             "⭐⭐⭐"),
     }
     return advice.get(n, ("年度主題 (Theme)", "—", "—", "⭐⭐⭐"))
@@ -148,71 +174,71 @@ def get_year_advice(n: int):
 # 幸運物件資料
 # =========================
 lucky_map = {
-    1: {"色": "🔴 紅色 (Red)", "水晶": "紅瑪瑙、石榴石 (Red Agate, Garnet)", "小物": "原子筆 (Pen)"},
-    2: {"色": "🟠 橙色 (Orange)", "水晶": "太陽石、橙月光 (Sunstone, Orange Moonstone)", "小物": "月亮吊飾 (Moon Charm)"},
-    3: {"色": "🟡 黃色 (Yellow)", "水晶": "黃水晶、黃虎眼 (Citrine, Yellow Tiger Eye)", "小物": "紙膠帶 (Washi Tape)"},
-    4: {"色": "🟢 綠色 (Green)", "水晶": "綠幽靈、孔雀石 (Green Phantom, Malachite)", "小物": "方形石頭 (Square Stone)"},
-    5: {"色": "🔵 藍色 (Blue)", "水晶": "海藍寶、藍紋瑪瑙 (Aquamarine, Blue Lace Agate)", "小物": "交通票卡 (Travel Card)"},
-    6: {"色": "🔷 靛色 (Indigo)", "水晶": "青金石、蘇打石 (Lapis Lazuli, Sodalite)", "小物": "愛心吊飾 (Heart Charm)"},
-    7: {"色": "🟣 紫色 (Purple)", "水晶": "紫水晶 (Amethyst)", "小物": "書籤 (Bookmark)"},
-    8: {"色": "💗 粉色 (Pink)", "水晶": "粉晶、草莓晶 (Rose Quartz, Strawberry Quartz)", "小物": "鋼筆 (Fountain Pen)"},
-    9: {"色": "⚪ 白色 (White)", "水晶": "白水晶、白月光 (Clear Quartz, White Moonstone)", "小物": "小香包 (Sachet)"},
-    0: {"色": "⚫️ 黑色 (Black)", "水晶": "黑曜石 (Obsidian)", "小物": "護身符 (Amulet)"},
+    1: {"色": "🔴 紅色 (Red)", "水晶": "紅瑪瑙、石榴石", "小物": "原子筆"},
+    2: {"色": "🟠 橙色 (Orange)", "水晶": "太陽石、橙月光", "小物": "月亮吊飾"},
+    3: {"色": "🟡 黃色 (Yellow)", "水晶": "黃水晶、黃虎眼", "小物": "紙膠帶"},
+    4: {"色": "🟢 綠色 (Green)", "水晶": "綠幽靈、孔雀石", "小物": "方形石頭"},
+    5: {"色": "🔵 藍色 (Blue)", "水晶": "海藍寶、藍紋瑪瑙", "小物": "交通票卡"},
+    6: {"色": "🔷 靛色 (Indigo)", "水晶": "青金石、蘇打石", "小物": "愛心吊飾"},
+    7: {"色": "🟣 紫色 (Purple)", "水晶": "紫水晶", "小物": "書籤"},
+    8: {"色": "💗 粉色 (Pink)", "水晶": "粉晶、草莓晶", "小物": "鋼筆"},
+    9: {"色": "⚪ 白色 (White)", "水晶": "白水晶、白月光", "小物": "小香包"},
+    0: {"色": "⚫️ 黑色 (Black)", "水晶": "黑曜石", "小物": "護身符"},
 }
 
 # =========================
 # 流日指引 & 星等
 # =========================
 flowing_day_guidance_map = {
-    "11/2": "與自己的內在靈性連結，打開心眼從心去看清楚背後的真相。\n(Connect with your inner spirituality; see the truth with your heart.)",
-    "12/3": "創意的想法和能量正在湧現，用純粹且動聽的方式傳遞出來。\n(Creative ideas are flowing; express them purely and beautifully.)",
-    "13/4": "讓想法不再只是想像，是時候設法落實到自己的現實生活中。\n(Turn imagination into reality; implement your ideas now.)",
-    "14/5": "轉化現有的狀態，從固有和凝滯的工作、關係中解脫。\n(Transform the status quo; break free from stagnation.)",
-    "15/6": "會特別渴望與某人深入交談、分享心事。\n(Longing for deep conversation and sharing feelings.)",
-    "16/7": "整理內在與學習的好時機，感到精神渙散時，需要讓自己靜下來。\n(Time to organize inner thoughts; quiet your mind if scattered.)",
-    "17/8": "會特別想處理與金錢、服務或管理相關的問題。\n(Focus on money, service, or management issues today.)",
-    "18/9": "在新階段來臨之前，先學會放下、告別與結束。\n(Learn to let go and say goodbye before the new phase begins.)",
-    "19/10/1": "會發現自己比平時更容易接收到來自內在或外在的靈感。\n(You are more receptive to inspiration from within and without.)",
-    "20/2": "內在外在都將迎來翻轉式的改變，洞見更加清晰的真相。\n(Changes inside and out; see the truth clearly through shifting perspectives.)",
-    "21/3": "今天點子和想法會比平常要多，好好運用溝通和表達來創造。\n(More ideas than usual; create through communication and expression.)",
-    "22/4": "多任務、多變動的一天。保持耐心與行動力。\n(Multi-tasking and changing day. Maintain patience and action.)",
-    "23/5": "是時候接收新的刺激和變動，考驗自己是否有足夠勇氣。\n(Accept new stimuli and changes; test your courage.)",
-    "24/6": "關心自己身邊親近的家人朋友，承諾與責任是今天的主題。\n(Care for family and friends; commitment and responsibility are themes.)",
-    "25/7": "專注在自己的事情上，在這當中找回內在的平靜與和諧感。\n(Focus on yourself; find inner peace and harmony.)",
-    "26/8": "強化自信與擔當，適合接下責任、處理財務、設定下一步策略。\n(Strengthen confidence; take responsibility, handle finances, strategize.)",
-    "27/9": "透過真理看見真相，有意識地放下是今天的重點。\n(See truth through wisdom; consciously letting go is key.)",
-    "28/10/1": "有強大顯化力與執行力的日子。保持務實、負責的態度。\n(Strong manifestation and execution; stay practical and responsible.)",
-    "29/11/2": "透過傾聽和觀察，從更高智慧層次解讀事情。\n(Listen and observe; interpret events from a higher wisdom.)",
-    "30/3": "今天的主題是溝通與協調，運用創意來做包裝和行銷。\n(Communication and coordination; use creativity for marketing.)",
-    "31/4": "創造中蘊含結構，靈感需要被規劃來落地。\n(Structure within creation; plan your inspiration into reality.)",
-    "32/5": "保持靈活和彈性，敞開心釋放和接收愛，有機會突破。\n(Be flexible; open your heart to love; breakthroughs are possible.)",
-    "33/6": "用創意、好玩的方式去服務和關愛，釋放壓抑。\n(Serve and love creatively; release suppression.)",
-    "34/7": "今日會想獨處反思，注意情緒管控。\n(Solitude and reflection; watch your emotional control.)",
-    "35/8": "推進與擴張的日子，結合創意與商業頭腦。\n(Expansion and progress; combine creativity with business sense.)",
-    "36/9": "在理想與現實之間取得平衡點，透過服務與奉獻幫助他人。\n(Balance ideal and reality; help others through service.)",
-    "37/10/1": "適時站出來為自己發聲，勇敢展現和展開新的行動。\n(Speak up for yourself; bravely show up and take action.)",
-    "38/11/2": "運用累積的經驗協助夥伴家人，用風趣方式點出問題。\n(Use experience to help others; point out issues with humor.)",
-    "39/12/3": "聲音和語言具有大能量，用話語去讚美自己和他人。\n(Words have power; use them to praise yourself and others.)",
-    "40/4": "以穩固為前提，更新現有的框架，建立新結構。\n(Update frameworks on a stable basis; build new structures.)",
-    "41/5": "穩定中尋求自由。突破常規，在變動中保持平衡。\n(Seek freedom in stability; break rules, balance in change.)",
-    "42/6": "規矩紀律需與人際關係並重，考量感性層面。\n(Balance discipline with relationships; consider the emotional side.)",
-    "43/7": "有強大的組織和分析能力，留意情緒控管與說話方式。\n(Strong organization/analysis; watch emotions and speech.)",
-    "44/8": "具強大執行力與影響力，避免固執而忽略他人聲音。\n(Strong execution and influence; avoid stubbornness.)",
-    "45/9": "運用理性邏輯深入省思，成就自身智慧。\n(Use logic to reflect deeply; achieve personal wisdom.)",
-    "46/10/1": "成為帶動者，展現組織合作能力，聚焦目標。\n(Be a leader; show cooperation skills; focus on goals.)",
-    "47/11/2": "扮演穩定可靠的關鍵角色，在重要時刻協助他人。\n(Be a stable, key figure; help others in critical moments.)",
-    "48/12/3": "在審慎評估下，做出富有創意的決策。\n(Make creative decisions after careful evaluation.)",
-    "49/13/4": "在穩定基礎下做出取捨，提升到更高境界。\n(Make choices on a stable base; elevate to a higher level.)",
-    "50/5": "變動中隱藏機會，享受這美好的時刻。\n(Opportunities hide in change; enjoy this moment.)",
-    "51/6": "勇敢面對恐懼和創傷，與自己和解。\n(Face fears and trauma; reconcile with yourself.)",
-    "52/7": "從核心切入剖析，看見真相。適合獨處深思。\n(Analyze from the core to see the truth; good for solitude.)",
-    "53/8": "有機會創造財富或經驗，保持開放。\n(Chance to create wealth/experience; stay open.)",
-    "54/9": "從漫無目的收斂聚焦，放下並感謝過往。\n(Focus from aimlessness; let go and thank the past.)",
-    "55/10/1": "極度外放和自我展現，留意是否冒犯。保持專注。\n(Extreme self-expression; avoid offense. Stay focused.)",
-    "56/11/2": "跳脫二元對立的思維模式，平衡自由與承諾。\n(Break dualistic thinking; balance freedom and commitment.)",
-    "57/12/3": "留意內在直覺，答案都在那裡。\n(Trust inner intuition; answers are there.)",
-    "58/13/4": "在變動中整合出新流程和規則。\n(Integrate new processes and rules amidst change.)",
-    "59/14/5": "富有挑戰性的一天，過去所學將迎來轉化。\n(Challenging day; past learnings will transform.)"
+    "11/2": "與自己的內在靈性連結，打開心眼從心去看清楚背後的真相。",
+    "12/3": "創意的想法和能量正在湧現，用純粹且動聽的方式傳遞出來。",
+    "13/4": "讓想法不再只是想像，是時候設法落實到自己的現實生活中。",
+    "14/5": "轉化現有的狀態，從固有和凝滯的工作、關係中解脫。",
+    "15/6": "會特別渴望與某人深入交談、分享心事。",
+    "16/7": "整理內在與學習的好時機，感到精神渙散時，需要讓自己靜下來。",
+    "17/8": "會特別想處理與金錢、服務或管理相關的問題。",
+    "18/9": "在新階段來臨之前，先學會放下、告別與結束。",
+    "19/10/1": "會發現自己比平時更容易接收到來自內在或外在的靈感。",
+    "20/2": "內在外在都將迎來翻轉式的改變，洞見更加清晰的真相。",
+    "21/3": "今天點子和想法會比平常要多，好好運用溝通和表達來創造。",
+    "22/4": "多任務、多變動的一天。保持耐心與行動力。",
+    "23/5": "是時候接收新的刺激和變動，考驗自己是否有足夠勇氣。",
+    "24/6": "關心自己身邊親近的家人朋友，承諾與責任是今天的主題。",
+    "25/7": "專注在自己的事情上，在這當中找回內在的平靜與和諧感。",
+    "26/8": "強化自信與擔當，適合接下責任、處理財務、設定下一步策略。",
+    "27/9": "透過真理看見真相，有意識地放下是今天的重點。",
+    "28/10/1": "有強大顯化力與執行力的日子。保持務實、負責的態度。",
+    "29/11/2": "透過傾聽和觀察，從更高智慧層次解讀事情。",
+    "30/3": "今天的主題是溝通與協調，運用創意來做包裝和行銷。",
+    "31/4": "創造中蘊含結構，靈感需要被規劃來落地。",
+    "32/5": "保持靈活和彈性，敞開心釋放和接收愛，有機會突破。",
+    "33/6": "用創意、好玩的方式去服務和關愛，釋放壓抑。",
+    "34/7": "今日會想獨處反思，注意情緒管控。",
+    "35/8": "推進與擴張的日子，結合創意與商業頭腦。",
+    "36/9": "在理想與現實之間取得平衡點，透過服務與奉獻幫助他人。",
+    "37/10/1": "適時站出來為自己發聲，勇敢展現和展開新的行動。",
+    "38/11/2": "運用累積的經驗協助夥伴家人，用風趣方式點出問題。",
+    "39/12/3": "聲音和語言具有大能量，用話語去讚美自己和他人。",
+    "40/4": "以穩固為前提，更新現有的框架，建立新結構。",
+    "41/5": "穩定中尋求自由。突破常規，在變動中保持平衡。",
+    "42/6": "規矩紀律需與人際關係並重，考量感性層面。",
+    "43/7": "有強大的組織和分析能力，留意情緒控管與說話方式。",
+    "44/8": "具強大執行力與影響力，避免固執而忽略他人聲音。",
+    "45/9": "運用理性邏輯深入省思，成就自身智慧。",
+    "46/10/1": "成為帶動者，展現組織合作能力，聚焦目標。",
+    "47/11/2": "扮演穩定可靠的關鍵角色，在重要時刻協助他人。",
+    "48/12/3": "在審慎評估下，做出富有創意的決策。",
+    "49/13/4": "在穩定基礎下做出取捨，提升到更高境界。",
+    "50/5": "變動中隱藏機會，享受這美好的時刻。",
+    "51/6": "勇敢面對恐懼和創傷，與自己和解。",
+    "52/7": "從核心切入剖析，看見真相。適合獨處深思。",
+    "53/8": "有機會創造財富或經驗，保持開放。",
+    "54/9": "從漫無目的收斂聚焦，放下並感謝過往。",
+    "55/10/1": "極度外放和自我展現，留意是否冒犯。保持專注。",
+    "56/11/2": "跳脫二元對立的思維模式，平衡自由與承諾。",
+    "57/12/3": "留意內在直覺，答案都在那裡。",
+    "58/13/4": "在變動中整合出新流程和規則。",
+    "59/14/5": "富有挑戰性的一天，過去所學將迎來轉化。"
 }
 
 def get_flowing_day_guidance(flowing_day_str: str) -> str:
@@ -279,7 +305,6 @@ def style_excel(df: pd.DataFrame) -> BytesIO:
 # =========================
 # Streamlit 介面
 # =========================
-st.set_page_config(page_title="樂覺製所生命靈數 | Numerology", layout="centered")
 st.title("🧭 樂覺製所生命靈數")
 st.markdown("在數字之中，我們與自己不期而遇。\n(In numbers, we meet ourselves unexpectedly.)\n\n**Be true, be you — 讓靈魂，自在呼吸。(Let the soul breathe freely.)**")
 
@@ -390,11 +415,23 @@ admin_password = st.sidebar.text_input("輸入密碼", type="password")
 if admin_password == "admin123":  # 預設密碼
     st.sidebar.success("已登入")
     stats_df = get_download_stats()
+    visits_df = get_visit_stats()
     
-    st.sidebar.write(f"📥 總下載次數: **{len(stats_df)}**")
+    # 顯示兩個指標：總瀏覽次數 & 總下載次數
+    col_a, col_b = st.sidebar.columns(2)
+    with col_a:
+        st.sidebar.metric("👀 總瀏覽", len(visits_df))
+    with col_b:
+        st.sidebar.metric("📥 總下載", len(stats_df))
     
+    st.sidebar.write("---")
+    
+    if not visits_df.empty:
+         with st.sidebar.expander("查看瀏覽紀錄 (Visits)"):
+            st.dataframe(visits_df)
+            
     if not stats_df.empty:
-        with st.sidebar.expander("查看詳細紀錄"):
+        with st.sidebar.expander("查看下載紀錄 (Downloads)"):
             st.dataframe(stats_df)
 elif admin_password:
     st.sidebar.error("密碼錯誤")
