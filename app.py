@@ -382,7 +382,7 @@ if st.button("🎉 產生日曆建議表 (Generate Excel)"):
 # =========================
 st.sidebar.markdown("---")
 st.sidebar.subheader("🔒 管理員專區 (Admin)")
-admin_password = st.sidebar.text_input("輸入密碼查看統計 (Password)", type="password")
+
 
 if admin_password == "admin123":  # 預設密碼，可自行修改
     st.sidebar.success("已登入 (Logged in)")
