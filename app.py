@@ -341,4 +341,3 @@ elif page == "📜 歷史紀錄 (Excel總表)":
         st.session_state['history'] = edited_df
         save_data()
         st.success("已更新紀錄！")
-        
