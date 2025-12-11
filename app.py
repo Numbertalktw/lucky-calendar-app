@@ -1,4 +1,3 @@
-2025/11/23 app更新 加入管理員
 
 # -*- coding: utf-8 -*-
 import streamlit as st
