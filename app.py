@@ -5,13 +5,12 @@ import os
 import time
 
 # ==========================================
-# 1. 核心設定與欄位定義
+# 1. 核心設定與欄位定義 (完全對應 Excel)
 # ==========================================
 
-# 系統設定
-PAGE_TITLE = "商品庫存管理系統 (Excel對應版)"
-INVENTORY_FILE = 'inventory_data_v2.csv'
-HISTORY_FILE = 'history_data_excel_v2.csv'
+PAGE_TITLE = "商品庫存管理系統 (Excel 對應版)"
+INVENTORY_FILE = 'inventory_data_v3.csv'
+HISTORY_FILE = 'history_data_excel_v3.csv'
 
 # --- 核心重點：依照您的 Excel 截圖定義 18 個欄位 ---
 # 對應順序：
@@ -31,15 +30,15 @@ HISTORY_COLUMNS = [
     '經手人', 
     '訂單單號', 
     '出貨日期', 
-    '貨號備註',   # 原本的出貨單據號碼位置，依圖改為貨號備註
-    '運費',       # 新增
-    '款項結清',   # 新增
+    '貨號備註',   
+    '運費',       
+    '款項結清',   
     '工資', 
     '發票', 
     '備註'
 ]
 
-# 庫存檔 (Inventory) 保持簡單，用來記錄當前數量
+# 庫存檔 (只記錄當前狀態)
 INVENTORY_COLUMNS = [
     '貨號', '系列', '分類', '品名', 
     '庫存數量', '平均成本'
@@ -51,12 +50,11 @@ DEFAULT_CATEGORIES = ["包裝材料", "天然石", "配件", "耗材", "成品"]
 DEFAULT_HANDLERS = ["Wen", "店長", "小幫手"]
 
 # ==========================================
-# 2. 資料處理函式
+# 2. 資料讀寫函式
 # ==========================================
 
 def load_data():
-    """讀取資料"""
-    # 1. 庫存
+    # 讀取庫存
     if os.path.exists(INVENTORY_FILE):
         try:
             inv_df = pd.read_csv(INVENTORY_FILE)
@@ -69,11 +67,11 @@ def load_data():
     else:
         inv_df = pd.DataFrame(columns=INVENTORY_COLUMNS)
 
-    # 2. 歷史紀錄
+    # 讀取紀錄
     if os.path.exists(HISTORY_FILE):
         try:
             hist_df = pd.read_csv(HISTORY_FILE)
-            # 補齊新欄位
+            # 確保欄位齊全
             for col in HISTORY_COLUMNS:
                 if col not in hist_df.columns:
                     hist_df[col] = ""
@@ -86,7 +84,6 @@ def load_data():
     return inv_df, hist_df
 
 def save_data():
-    """儲存資料"""
     if 'inventory' in st.session_state:
         st.session_state['inventory'].to_csv(INVENTORY_FILE, index=False, encoding='utf-8-sig')
     if 'history' in st.session_state:
@@ -124,7 +121,7 @@ if 'inventory' not in st.session_state:
     st.session_state['history'] = hist_data
 
 # ==========================================
-# 4. Streamlit UI
+# 4. Streamlit UI 介面
 # ==========================================
 
 st.set_page_config(page_title=PAGE_TITLE, layout="wide", page_icon="📋")
@@ -135,84 +132,91 @@ with st.sidebar:
     page = st.radio("前往", ["📝 庫存異動 (輸入資料)", "📦 商品建檔與庫存表", "📜 歷史紀錄 (Excel總表)"])
     
     st.divider()
+    st.markdown("### 下載備份")
     if not st.session_state['history'].empty:
         csv_h = st.session_state['history'].to_csv(index=False).encode('utf-8-sig')
-        st.download_button("📥 下載 Excel 紀錄表 (CSV)", csv_h, f'History_{date.today()}.csv', "text/csv")
+        st.download_button("📥 下載 Excel 紀錄表", csv_h, f'History_{date.today()}.csv', "text/csv")
 
 # ---------------------------------------------------------
-# 頁面 1: 庫存異動 (核心輸入區 - 所有欄位都要有)
+# 頁面 1: 庫存異動 (所有欄位輸入區)
 # ---------------------------------------------------------
 if page == "📝 庫存異動 (輸入資料)":
     st.subheader("📝 新增異動紀錄")
-    st.caption("請填寫下方欄位，系統將自動產生「單號」並更新庫存。")
-
+    
     inv_df = st.session_state['inventory']
     
+    # 檢查是否有商品
     if inv_df.empty:
-        st.warning("⚠️ 目前無商品，請先至「商品建檔」建立商品資料。")
+        st.warning("⚠️ 目前還沒有商品資料！")
+        st.info("請先點擊左側選單的 **「📦 商品建檔與庫存表」**，建立至少一個商品後，這裡就會出現輸入表格了。")
     else:
-        # --- 選擇商品 ---
+        # --- 選擇要操作的商品 ---
         inv_df['label'] = inv_df['貨號'] + " | " + inv_df['品名'] + " | 庫存:" + inv_df['庫存數量'].astype(str)
         
         c_sel, c_act = st.columns([2, 1])
         with c_sel:
-            selected_label = st.selectbox("🔍 選擇商品", inv_df['label'].tolist())
+            selected_label = st.selectbox("🔍 步驟 1：選擇商品", inv_df['label'].tolist())
             target_row = inv_df[inv_df['label'] == selected_label].iloc[0]
             target_idx = inv_df[inv_df['label'] == selected_label].index[0]
         with c_act:
-            action_type = st.radio("動作", ["入庫", "出庫"], horizontal=True)
+            action_type = st.radio("步驟 2：動作", ["入庫", "出庫"], horizontal=True)
 
         st.divider()
 
-        # --- 表單輸入 (對應 Excel 所有欄位) ---
+        # --- 步驟 3：填寫欄位 (對應 Excel) ---
+        st.markdown("#### 步驟 3：填寫詳細資料")
         with st.form("transaction_form"):
-            # 1. 基本資訊 (自動帶入 + 必填)
-            st.markdown("##### 📦 基本資料 (A-F, H-J)")
+            
+            # 第一排：基本異動資訊 (對應 A, B, I, J)
+            st.markdown("**1. 基本資訊**")
             r1_1, r1_2, r1_3, r1_4 = st.columns(4)
             txn_date = r1_1.date_input("日期 (B)", value=date.today())
             qty = r1_2.number_input("數量 (I)", min_value=1, value=1)
             handler = r1_3.selectbox("經手人 (J)", DEFAULT_HANDLERS)
+            # A 欄單號是自動產生的，這裡不顯示
             
-            # 顯示商品資訊 (唯讀)
-            st.text(f"商品資訊：{target_row['系列']} / {target_row['分類']} / {target_row['品名']} ({target_row['貨號']})")
+            # 顯示目前選到的商品資訊 (對應 C, D, E, F)
+            st.info(f"商品資訊：{target_row['系列']} / {target_row['分類']} / {target_row['品名']} ({target_row['貨號']})")
 
-            st.markdown("##### 🚚 單據與款項 (G, K-R)")
-            # 2. 單據資訊
+            # 第二排：單據資訊 (對應 G, K, L, M)
+            st.markdown("**2. 單據資訊**")
             r2_1, r2_2, r2_3, r2_4 = st.columns(4)
-            order_id = r2_1.text_input("訂單單號 (K)", placeholder="蝦皮/客戶單號")
+            order_id = r2_1.text_input("訂單單號 (K)", placeholder="例如：蝦皮單號")
             ship_date_val = r2_2.date_input("出貨日期 (L)", value=date.today())
-            sku_note = r2_3.text_input("貨號備註 (M)", placeholder="例如：NG/白色")
-            out_id_custom = r2_4.text_input("出庫單號(可複寫) (G)", placeholder="留空自動產生")
+            sku_note = r2_3.text_input("貨號備註 (M)", placeholder="例如：NG品/白色")
+            out_id_custom = r2_4.text_input("出庫單號(可複寫) (G)", placeholder="留空則自動產生")
 
-            # 3. 費用與結算
+            # 第三排：費用與結算 (對應 N, O, P, Q)
+            st.markdown("**3. 費用與結算**")
             r3_1, r3_2, r3_3, r3_4 = st.columns(4)
             shipping_fee = r3_1.text_input("運費 (N)", placeholder="0")
             payment_status = r3_2.selectbox("款項結清 (O)", ["", "是", "否", "部分"], index=0)
             labor_cost = r3_3.text_input("工資 (P)", placeholder="0")
             invoice_no = r3_4.text_input("發票 (Q)", placeholder="發票號碼")
 
-            # 4. 備註
+            # 第四排：備註 (R)
             note = st.text_area("備註 (R)", placeholder="其他說明...")
 
-            # 入庫成本 (不寫入 Excel 顯示欄位，但用於計算平均成本)
+            # 額外：如果是入庫，可以輸入成本來計算平均成本
             cost_input = 0
             if action_type == "入庫":
-                cost_input = st.number_input("本次進貨總成本 (用於計算平均成本)", min_value=0)
+                cost_input = st.number_input("本次進貨總成本 (系統計算用，不寫入表格)", min_value=0)
 
-            if st.form_submit_button("✅ 確認送出", type="primary"):
-                # 產生單號 (A)
+            # 送出按鈕
+            if st.form_submit_button("✅ 確認送出並寫入紀錄", type="primary"):
+                # 1. 產生單號 (A)
                 now_str = datetime.now().strftime('%Y%m%d%H%M%S')
                 record_id = f"{now_str}" 
                 
-                # 處理出庫單號 (G)
+                # 2. 處理出庫單號 (G)
                 final_out_id = out_id_custom
                 if action_type == "出庫" and not final_out_id:
                     final_out_id = f"OUT-{datetime.now().strftime('%Y%m%d')}"
 
-                # 處理出入庫欄位 (H)
-                io_status = f"{action_type}-{handler}" # 例如：入庫-Wen
+                # 3. 處理出入庫欄位 (H) - 格式如圖: "入庫-Wen"
+                io_status = f"{action_type}-{handler}"
 
-                # 更新庫存
+                # 4. 更新庫存數量
                 current_qty = float(target_row['庫存數量'])
                 current_avg = float(target_row['平均成本'])
                 
@@ -223,13 +227,13 @@ if page == "📝 庫存異動 (輸入資料)":
                     new_avg = total_val / new_qty if new_qty > 0 else 0
                     st.session_state['inventory'].at[target_idx, '庫存數量'] = new_qty
                     st.session_state['inventory'].at[target_idx, '平均成本'] = new_avg
-                    st.success(f"已入庫 {qty} 個")
+                    st.success(f"已入庫 {qty} 個，目前庫存 {new_qty}")
                 else:
                     new_qty = current_qty - qty
                     st.session_state['inventory'].at[target_idx, '庫存數量'] = new_qty
-                    st.success(f"已出庫 {qty} 個")
+                    st.success(f"已出庫 {qty} 個，剩餘庫存 {new_qty}")
 
-                # 寫入歷史紀錄 (18欄位)
+                # 5. 寫入歷史紀錄 (18欄位完全對應)
                 new_record = {
                     '單號': record_id,
                     '日期': txn_date,
@@ -268,6 +272,7 @@ elif page == "📦 商品建檔與庫存表":
     tab_new, tab_list = st.tabs(["✨ 建立新商品", "📋 現有庫存清單"])
     
     with tab_new:
+        st.write("第一次使用請先在此建立商品，建立後才能進行入庫/出庫。")
         with st.form("create_item"):
             c1, c2 = st.columns(2)
             cat_opts = get_options(st.session_state['inventory'], '分類', DEFAULT_CATEGORIES)
@@ -301,7 +306,11 @@ elif page == "📦 商品建檔與庫存表":
     with tab_list:
         st.dataframe(
             st.session_state['inventory'], 
-            use_container_width=True
+            use_container_width=True,
+            column_config={
+                "庫存數量": st.column_config.NumberColumn(help="當前總庫存量"),
+                "平均成本": st.column_config.NumberColumn(format="$%.2f")
+            }
         )
 
 # ---------------------------------------------------------
@@ -309,7 +318,7 @@ elif page == "📦 商品建檔與庫存表":
 # ---------------------------------------------------------
 elif page == "📜 歷史紀錄 (Excel總表)":
     st.subheader("📜 歷史紀錄總表")
-    st.caption("欄位完全對應您的 Excel 截圖，可直接編輯修改。")
+    st.caption("欄位順序已完全對應您的 Excel 截圖。")
     
     df_hist = st.session_state['history']
     
@@ -332,3 +341,4 @@ elif page == "📜 歷史紀錄 (Excel總表)":
         st.session_state['history'] = edited_df
         save_data()
         st.success("已更新紀錄！")
+        
