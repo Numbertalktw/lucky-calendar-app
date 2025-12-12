@@ -1,438 +1,595 @@
-
-# -*- coding: utf-8 -*-
 import streamlit as st
-import datetime
 import pandas as pd
-from io import BytesIO
-import calendar
-import sqlite3  # 新增：用於資料庫
-from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
+from datetime import date, datetime
+import os
+import time
 
-# =========================
-# 資料庫功能 (Backend Stats)
-# =========================
-DB_FILE = 'stats.db'
+# ==========================================
+# 1. 核心邏輯與設定區
+# ==========================================
 
-def init_db():
-    """初始化資料庫"""
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    # 建立下載紀錄表
-    c.execute('''CREATE TABLE IF NOT EXISTS downloads 
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                  timestamp DATETIME DEFAULT CURRENT_TIMESTAMP, 
-                  filename TEXT)''')
-    # 建立瀏覽紀錄表 (新增)
-    c.execute('''CREATE TABLE IF NOT EXISTS visits 
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                  timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)''')
-    conn.commit()
-    conn.close()
+# 系統標準欄位 (已移除 '系列' 與 '尺寸規格')
+COLUMNS = [
+    '編號', '分類', '名稱', 
+    '寬度mm', '長度mm', '形狀', '五行', 
+    '進貨總價', '進貨數量(顆)', '進貨日期', '進貨廠商', 
+    '庫存(顆)', '單顆成本'
+]
 
-def log_download(filename):
-    """記錄下載事件 (Callback)"""
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("INSERT INTO downloads (filename) VALUES (?)", (filename,))
-    conn.commit()
-    conn.close()
+# 歷史紀錄欄位
+HISTORY_COLUMNS = [
+    '紀錄時間', '單號', '動作', '編號', '分類', '名稱', '規格', 
+    '廠商', '進貨數量', '進貨總價', '單價'
+]
 
-def log_visit():
-    """記錄瀏覽事件"""
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("INSERT INTO visits (timestamp) VALUES (CURRENT_TIMESTAMP)")
-    conn.commit()
-    conn.close()
+# 設計銷售紀錄欄位
+DESIGN_HISTORY_COLUMNS = [
+    '單號', '日期', '總顆數', '材料成本', '工資', '雜支', 
+    '總成本', '售價(x3)', '售價(x5)', '明細內容'
+]
 
-def get_download_stats():
-    """讀取下載數據"""
-    conn = sqlite3.connect(DB_FILE)
-    df = pd.read_sql_query("SELECT timestamp, filename FROM downloads ORDER BY timestamp DESC", conn)
-    conn.close()
-    return df
+DEFAULT_CSV_FILE = 'inventory_backup_v2.csv'
+DESIGN_HISTORY_FILE = 'design_sales_history.csv'
 
-def get_visit_stats():
-    """讀取瀏覽數據"""
-    conn = sqlite3.connect(DB_FILE)
-    df = pd.read_sql_query("SELECT timestamp FROM visits ORDER BY timestamp DESC", conn)
-    conn.close()
-    return df
+# 預設選單資料
+DEFAULT_SUPPLIERS = ["小聰頭", "廠商A", "廠商B", "自用", "蝦皮", "淘寶"]
+DEFAULT_SHAPES = ["圓珠", "切角", "鑽切", "圓筒", "方體", "長柱", "不規則", "造型"]
+DEFAULT_ELEMENTS = ["金", "木", "水", "火", "土", "綜合"]
 
-# 初始化資料庫
-init_db()
-
-# =========================
-# Streamlit 設定與瀏覽計數
-# =========================
-st.set_page_config(page_title="樂覺製所生命靈數 | Numerology", layout="centered")
-
-# 瀏覽計數邏輯：使用 session_state 避免同一工作階段重複計算
-if 'has_visited' not in st.session_state:
-    log_visit()
-    st.session_state['has_visited'] = True
-
-# =========================
-# 公用數字處理
-# =========================
-def reduce_to_digit(n: int) -> int:
-    """反覆位數相加直到一位數"""
-    while n > 9:
-        n = sum(int(x) for x in str(n))
-    return n
-
-def sum_once(n: int) -> int:
-    """只做一次位數相加"""
-    return sum(int(x) for x in str(n))
-
-def format_layers(total: int) -> str:
-    """輸出三段式（或二段式）顯示"""
-    mid = sum_once(total)
-    return f"{total}/{mid}/{reduce_to_digit(mid)}" if mid > 9 else f"{total}/{mid}"
-
-# =========================
-# 新增功能：生命靈數主命數計算
-# =========================
-def calculate_life_path_number(birthday: datetime.date) -> tuple[int, int, str]:
-    """
-    計算生命靈數主命數
-    邏輯：1999/10/26 -> 1+9+9+9+1+0+2+6 = 37 -> 3+7=10 -> 1
-    回傳：(主命數, 第一階段總和, 計算過程字串)
-    """
-    date_str = birthday.strftime("%Y%m%d")
-    total_sum = sum(int(char) for char in date_str)
-    final_num = reduce_to_digit(total_sum)
-    
-    process_str = f"{total_sum} → {final_num}"
-    if total_sum != final_num and total_sum > 9:
-        second_step = sum_once(total_sum)
-        if second_step > 9 and second_step != final_num:
-             process_str = f"{total_sum} → {second_step} → {final_num}"
-        else:
-             process_str = f"{total_sum} → {final_num}"
-
-    return final_num, total_sum, process_str
-
-# =========================
-# 生命靈數：流年計算
-# =========================
-def life_year_number_for_year(birthday: datetime.date, query_year: int) -> tuple[int, int]:
-    before_total = (query_year - 1) + birthday.month + birthday.day
-    after_total  = (query_year)     + birthday.month + birthday.day
-    return reduce_to_digit(sum_once(before_total)), reduce_to_digit(sum_once(after_total))
-
-def life_year_number_for_date(birthday: datetime.date, query_date: datetime.date) -> int:
-    cutoff = datetime.date(query_date.year, birthday.month, birthday.day)
-    base_year = query_date.year - 1 if query_date < cutoff else query_date.year
-    total = base_year + birthday.month + birthday.day
-    return reduce_to_digit(sum_once(total))
-
-# =========================
-# 流年解說
-# =========================
-def get_year_advice(n: int):
-    advice = {
-        1: ("自主與突破之年 (Year of Autonomy & Breakthrough)", 
-            "容易衝動、單打獨鬥 (Impulsive, fighting alone)",
-            "設定清晰目標；在決策前先蒐集意見、給自己緩衝時間。", 
-            "⭐⭐⭐⭐"),
-        2: ("協作與關係之年 (Year of Collaboration & Relationships)", 
-            "過度迎合、忽略自我 (Over-accommodating, ignoring self)",
-            "練習明確表達需求、建立健康邊界；耐心溝通。", 
-            "⭐⭐⭐"),
-        3: ("創意與表達之年 (Year of Creativity & Expression)", 
-            "分心、情緒起伏 (Distracted, emotional fluctuations)",
-            "為創作與學習預留固定時段；公開練習表達。", 
-            "⭐⭐⭐⭐"),
-        4: ("穩定與基礎之年 (Year of Stability & Foundation)", 
-            "壓力感、僵化完美主義 (Stress, rigid perfectionism)",
-            "用『可持續的小步驟』築基礎；為計畫預留彈性。", 
-            "⭐⭐⭐"),
-        5: ("變動與自由之年 (Year of Change & Freedom)", 
-            "焦躁、衝動決策 (Restless, impulsive decisions)",
-            "先設安全網再突破；用短衝 (sprint) 測試新方向。", 
-            "⭐⭐⭐⭐"),
-        6: ("關懷與責任之年 (Year of Care & Responsibility)", 
-            "過度承擔、忽略自我 (Over-burdened, self-neglect)",
-            "把『照顧自己』寫進行程；清楚承諾與界線。", 
-            "⭐⭐⭐"),
-        7: ("內省與學習之年 (Year of Introspection & Learning)", 
-            "孤立、鑽牛角尖 (Isolation, overthinking)",
-            "安排獨處＋定期對談；用寫作/冥想整理解讀。", 
-            "⭐⭐⭐"),
-        8: ("事業與財務之年 (Year of Career & Finance)", 
-            "過度追求成就、忽略健康情感 (Over-achieving, ignoring health/emotions)",
-            "設定績效與復原節奏並行；學會授權與談判。", 
-            "⭐⭐⭐⭐"),
-        9: ("收尾與釋放之年 (Year of Completion & Release)", 
-            "抗拒結束、情緒回顧 (Resisting endings, emotional nostalgia)",
-            "用感恩做結案；做斷捨離，替新循環清出空間。", 
-            "⭐⭐⭐"),
-    }
-    return advice.get(n, ("年度主題 (Theme)", "—", "—", "⭐⭐⭐"))
-
-# =========================
-# 幸運物件資料
-# =========================
-lucky_map = {
-    1: {"色": "🔴 紅色 (Red)", "水晶": "紅瑪瑙、石榴石", "小物": "原子筆"},
-    2: {"色": "🟠 橙色 (Orange)", "水晶": "太陽石、橙月光", "小物": "月亮吊飾"},
-    3: {"色": "🟡 黃色 (Yellow)", "水晶": "黃水晶、黃虎眼", "小物": "紙膠帶"},
-    4: {"色": "🟢 綠色 (Green)", "水晶": "綠幽靈、孔雀石", "小物": "方形石頭"},
-    5: {"色": "🔵 藍色 (Blue)", "水晶": "海藍寶、藍紋瑪瑙", "小物": "交通票卡"},
-    6: {"色": "🔷 靛色 (Indigo)", "水晶": "青金石、蘇打石", "小物": "愛心吊飾"},
-    7: {"色": "🟣 紫色 (Purple)", "水晶": "紫水晶", "小物": "書籤"},
-    8: {"色": "💗 粉色 (Pink)", "水晶": "粉晶、草莓晶", "小物": "鋼筆"},
-    9: {"色": "⚪ 白色 (White)", "水晶": "白水晶、白月光", "小物": "小香包"},
-    0: {"色": "⚫️ 黑色 (Black)", "水晶": "黑曜石", "小物": "護身符"},
+# 初始範例資料
+INITIAL_DATA = {
+    '編號': ['ST0001'],
+    '分類': ['天然石'],
+    '名稱': ['範例水晶'],
+    '寬度mm': [6.0],
+    '長度mm': [6.0],
+    '形狀': ['圓珠'],
+    '五行': ['綜合'],
+    '進貨總價': [100],
+    '進貨數量(顆)': [100],
+    '進貨日期': [str(date.today())],
+    '進貨廠商': ['範例廠商'],
+    '庫存(顆)': [100],
+    '單顆成本': [1.0]
 }
 
-# =========================
-# 流日指引 & 星等
-# =========================
-flowing_day_guidance_map = {
-    "11/2": "與自己的內在靈性連結，打開心眼從心去看清楚背後的真相。",
-    "12/3": "創意的想法和能量正在湧現，用純粹且動聽的方式傳遞出來。",
-    "13/4": "讓想法不再只是想像，是時候設法落實到自己的現實生活中。",
-    "14/5": "轉化現有的狀態，從固有和凝滯的工作、關係中解脫。",
-    "15/6": "會特別渴望與某人深入交談、分享心事。",
-    "16/7": "整理內在與學習的好時機，感到精神渙散時，需要讓自己靜下來。",
-    "17/8": "會特別想處理與金錢、服務或管理相關的問題。",
-    "18/9": "在新階段來臨之前，先學會放下、告別與結束。",
-    "19/10/1": "會發現自己比平時更容易接收到來自內在或外在的靈感。",
-    "20/2": "內在外在都將迎來翻轉式的改變，洞見更加清晰的真相。",
-    "21/3": "今天點子和想法會比平常要多，好好運用溝通和表達來創造。",
-    "22/4": "多任務、多變動的一天。保持耐心與行動力。",
-    "23/5": "是時候接收新的刺激和變動，考驗自己是否有足夠勇氣。",
-    "24/6": "關心自己身邊親近的家人朋友，承諾與責任是今天的主題。",
-    "25/7": "專注在自己的事情上，在這當中找回內在的平靜與和諧感。",
-    "26/8": "強化自信與擔當，適合接下責任、處理財務、設定下一步策略。",
-    "27/9": "透過真理看見真相，有意識地放下是今天的重點。",
-    "28/10/1": "有強大顯化力與執行力的日子。保持務實、負責的態度。",
-    "29/11/2": "透過傾聽和觀察，從更高智慧層次解讀事情。",
-    "30/3": "今天的主題是溝通與協調，運用創意來做包裝和行銷。",
-    "31/4": "創造中蘊含結構，靈感需要被規劃來落地。",
-    "32/5": "保持靈活和彈性，敞開心釋放和接收愛，有機會突破。",
-    "33/6": "用創意、好玩的方式去服務和關愛，釋放壓抑。",
-    "34/7": "今日會想獨處反思，注意情緒管控。",
-    "35/8": "推進與擴張的日子，結合創意與商業頭腦。",
-    "36/9": "在理想與現實之間取得平衡點，透過服務與奉獻幫助他人。",
-    "37/10/1": "適時站出來為自己發聲，勇敢展現和展開新的行動。",
-    "38/11/2": "運用累積的經驗協助夥伴家人，用風趣方式點出問題。",
-    "39/12/3": "聲音和語言具有大能量，用話語去讚美自己和他人。",
-    "40/4": "以穩固為前提，更新現有的框架，建立新結構。",
-    "41/5": "穩定中尋求自由。突破常規，在變動中保持平衡。",
-    "42/6": "規矩紀律需與人際關係並重，考量感性層面。",
-    "43/7": "有強大的組織和分析能力，留意情緒控管與說話方式。",
-    "44/8": "具強大執行力與影響力，避免固執而忽略他人聲音。",
-    "45/9": "運用理性邏輯深入省思，成就自身智慧。",
-    "46/10/1": "成為帶動者，展現組織合作能力，聚焦目標。",
-    "47/11/2": "扮演穩定可靠的關鍵角色，在重要時刻協助他人。",
-    "48/12/3": "在審慎評估下，做出富有創意的決策。",
-    "49/13/4": "在穩定基礎下做出取捨，提升到更高境界。",
-    "50/5": "變動中隱藏機會，享受這美好的時刻。",
-    "51/6": "勇敢面對恐懼和創傷，與自己和解。",
-    "52/7": "從核心切入剖析，看見真相。適合獨處深思。",
-    "53/8": "有機會創造財富或經驗，保持開放。",
-    "54/9": "從漫無目的收斂聚焦，放下並感謝過往。",
-    "55/10/1": "極度外放和自我展現，留意是否冒犯。保持專注。",
-    "56/11/2": "跳脫二元對立的思維模式，平衡自由與承諾。",
-    "57/12/3": "留意內在直覺，答案都在那裡。",
-    "58/13/4": "在變動中整合出新流程和規則。",
-    "59/14/5": "富有挑戰性的一天，過去所學將迎來轉化。"
-}
+# ==========================================
+# 2. 核心邏輯函式
+# ==========================================
 
-def get_flowing_day_guidance(flowing_day_str: str) -> str:
-    return flowing_day_guidance_map.get(flowing_day_str, "")
+def save_inventory():
+    """儲存庫存"""
+    try:
+        if 'inventory' in st.session_state:
+            st.session_state['inventory'].to_csv(DEFAULT_CSV_FILE, index=False, encoding='utf-8-sig')
+    except Exception: pass
 
-def get_flowing_day_star(flowing_day_str: str) -> str:
-    star_map = {
-        "11/2":"🌟🌟","12/3":"🌟🌟🌟🌟","13/4":"🌟🌟🌟🌟","14/5":"🌟🌟",
-        "15/6":"🌟🌟🌟🌟","16/7":"🌟🌟🌟","17/8":"🌟🌟🌟🌟🌟","18/9":"🌟🌟",
-        "19/10/1":"🌟🌟🌟🌟","20/2":"🌟🌟🌟","21/3":"🌟🌟🌟🌟","22/4":"🌟🌟🌟",
-        "23/5":"🌟🌟🌟🌟","24/6":"🌟🌟🌟","25/7":"🌟🌟","26/8":"🌟🌟🌟🌟🌟",
-        "27/9":"🌟🌟🌟","28/10/1":"🌟🌟🌟🌟🌟","29/11/2":"🌟🌟🌟","30/3":"🌟🌟🌟🌟",
-        "31/4":"🌟🌟🌟🌟","32/5":"🌟🌟🌟🌟","33/6":"🌟🌟🌟","34/7":"🌟🌟",
-        "35/8":"🌟🌟🌟🌟🌟","36/9":"🌟🌟🌟🌟","37/10/1":"🌟🌟🌟🌟🌟","38/11/2":"🌟🌟🌟",
-        "39/12/3":"🌟🌟🌟🌟","40/4":"🌟🌟🌟","41/5":"🌟🌟🌟🌟","42/6":"🌟🌟🌟",
-        "43/7":"🌟🌟🌟","44/8":"🌟🌟🌟🌟","45/9":"🌟🌟🌟","46/10/1":"🌟🌟🌟🌟",
-        "47/11/2":"🌟🌟🌟","48/12/3":"🌟🌟🌟🌟","49/13/4":"🌟🌟🌟","50/5":"🌟🌟🌟🌟",
-        "51/6":"🌟🌟","52/7":"🌟🌟🌟","53/8":"🌟🌟🌟🌟","54/9":"🌟🌟",
-        "55/10/1":"🌟🌟🌟","56/11/2":"🌟🌟","57/12/3":"🌟🌟🌟🌟","58/13/4":"🌟🌟🌟",
-        "59/14/5":"🌟🌟🌟🌟🌟"
+def save_design_history():
+    """儲存銷售紀錄"""
+    try:
+        if 'design_history' in st.session_state:
+            st.session_state['design_history'].to_csv(DESIGN_HISTORY_FILE, index=False, encoding='utf-8-sig')
+    except Exception: pass
+
+def normalize_columns(df):
+    """標準化欄位名稱並移除舊的多餘欄位"""
+    rename_map = {
+        '尺寸': '寬度mm', 'Size': '寬度mm', '寬度': '寬度mm', 'Width': '寬度mm',
+        '長度': '長度mm', 'Length': '長度mm',
+        'Name': '名稱', 'Category': '分類', 'Code': '編號', 'ID': '編號',
+        '尺寸規格': '備註規格' # 將舊的尺寸規格暫存，避免遺失，但主要邏輯改用寬/長
     }
-    return star_map.get(flowing_day_str, "🌟🌟🌟")
-
-def get_flowing_year_ref(query_date, bday):
-    query_date = query_date.date() if hasattr(query_date, "date") else query_date
-    cutoff = datetime.date(query_date.year, bday.month, bday.day)
-    return query_date.year - 1 if query_date < cutoff else query_date.year
-
-def get_flowing_month_ref(query_date, birthday):
-    query_date = query_date.date() if hasattr(query_date, "date") else query_date
-    if query_date.day < birthday.day:
-        return query_date.month - 1 if query_date.month > 1 else 12
-    return query_date.month
-
-# =========================
-# 匯出 Excel 樣式
-# =========================
-def style_excel(df: pd.DataFrame) -> BytesIO:
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name="流年月曆")
-        workbook = writer.book
-        worksheet = workbook["流年月曆"]
-        header_font = Font(size=12, bold=True, color="FFFFFF")
-        header_fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
-        header_alignment = Alignment(horizontal="center", vertical="center")
-        for idx, column in enumerate(df.columns):
-            max_length = max((len(str(cell)) for cell in df[column]), default=15)
-            adjusted_width = max(15, min(int(max_length * 1.2), 100))
-            worksheet.column_dimensions[chr(65 + idx)].width = adjusted_width
-        for cell in worksheet[1]:
-            cell.font = header_font
-            cell.fill = header_fill
-            cell.alignment = header_alignment
-        thin_border = Border(left=Side(style='thin'), right=Side(style='thin'),
-                             top=Side(style='thin'), bottom=Side(style='thin'))
-        for row in worksheet.iter_rows():
-            for cell in row:
-                cell.border = thin_border
-                cell.alignment = Alignment(horizontal="center", vertical="center")
-            worksheet.row_dimensions[row[0].row].height = 35
-    return output
-
-# =========================
-# Streamlit 介面
-# =========================
-st.title("🧭 樂覺製所生命靈數")
-st.markdown("在數字之中，我們與自己不期而遇。\n(In numbers, we meet ourselves unexpectedly.)\n\n**Be true, be you — 讓靈魂，自在呼吸。(Let the soul breathe freely.)**")
-
-# -------- 區塊 A：流年速算 --------
-st.subheader("🌟 生命靈數 & 流年速算 (Life Path & Yearly Flow)")
-col1, col2 = st.columns([1.2, 1.2])
-with col1:
-    birthday = st.date_input("請輸入生日 (Birthday)", 
-                             value=datetime.date(1990, 1, 1),
-                             min_value=datetime.date(1900, 1, 1),
-                             max_value=datetime.date(2100, 12, 31))
-with col2:
-    ref_date = st.date_input("查詢日期 (Query Date)", 
-                             value=datetime.date(datetime.datetime.now().year, 12, 31),
-                             min_value=datetime.date(1900, 1, 1),
-                             max_value=datetime.date(2100, 12, 31))
-
-if st.button("計算靈數與流年 (Calculate)"):
-    life_num, life_sum, life_process = calculate_life_path_number(birthday)
-    lucky_life = lucky_map.get(life_num, {})
-    st.markdown("---")
-    st.subheader(f"🔮 您的生命靈數主命數：【 {life_num} 】號人")
-    st.caption(f"Life Path Number: {life_num}")
-    st.caption(f"計算公式 (Formula)：將西元生日數字全部加總 ({birthday.strftime('%Y/%m/%d')})")
-    st.text(f"計算過程 (Calculation)：{life_sum} → {life_process}")
-    if lucky_life:
-         st.info(f"✨ **幸運色 (Color)**：{lucky_life.get('色')} ｜ **水晶 (Crystal)**：{lucky_life.get('水晶')} ｜ **小物 (Item)**：{lucky_life.get('小物')}")
-    st.markdown("---")
-    today_n = life_year_number_for_date(birthday, ref_date)
-    before_n, after_n = life_year_number_for_year(birthday, ref_date.year)
-    st.markdown("### 📊 流年結果 (Yearly Flow Result)")
-    st.write(f"**本年流年數（依查詢日期 {ref_date}）：** {today_n}")
-    st.caption(f"Current Year Number (based on query date): {today_n}")
-    st.caption(f"今年生日前 (Before Birthday): {before_n} ｜ 生日當天起 (After Birthday): {after_n}")
-    title, challenge, action, stars = get_year_advice(today_n)
-    lucky_year = lucky_map.get(today_n, {})
-    st.markdown("#### 🪄 流年解說 (Guidance for the Year)")
-    st.markdown(f"**主題 (Theme)**：{title} \n**運勢指數 (Stars)**：{stars} \n**挑戰 (Challenge)**：{challenge} \n**建議行動 (Action)**：{action} \n\n**幸運顏色 (Color)**：{lucky_year.get('色','')} \n**建議水晶 (Crystal)**：{lucky_year.get('水晶','')}")
-    with st.expander("查看「今年生日前／生日當天起」兩階段的解讀 (View detailed breakdown)"):
-        for label_ch, label_en, num in [("今年生日前", "Before Birthday", before_n), ("生日當天起", "After Birthday", after_n)]:
-            t, c, a, s = get_year_advice(num)
-            lk = lucky_map.get(num, {})
-            st.markdown(f"**{label_ch} ({label_en}) → 流年數 {num}** • 主題 (Theme)：{t} \n• ⭐：{s} \n• 挑戰 (Challenge)：{c} \n• 建議 (Advice)：{a} \n• 幸運色 / 水晶 (Color/Crystal)：{lk.get('色','')} / {lk.get('水晶','')}")
-
-# -------- 區塊 B：流年月曆產生器 --------
-st.subheader("📅 產生 1 個月份的『流年月曆』建議表 (Generate Monthly Calendar)")
-target_month = st.selectbox("請選擇月份 (Select Month)", list(range(1, 13)), index=datetime.datetime.now().month - 1)
-
-if st.button("🎉 產生日曆建議表 (Generate Excel)"):
-    target_year_for_calendar = ref_date.year
-    _, last_day = calendar.monthrange(target_year_for_calendar, target_month)
-    days = pd.date_range(start=datetime.date(target_year_for_calendar, target_month, 1),
-                         end=datetime.date(target_year_for_calendar, target_month, last_day))
-    data = []
-    for d in days:
-        fd_total = sum(int(x) for x in f"{birthday.year}{birthday.month:02}{d.day:02}")
-        flowing_day = format_layers(fd_total)
-        main_number = reduce_to_digit(fd_total)
-        lucky = lucky_map.get(main_number, {})
-        guidance = get_flowing_day_guidance(flowing_day)
-        year_ref = get_flowing_year_ref(d, birthday)
-        fy_total = sum(int(x) for x in f"{year_ref}{birthday.month:02}{birthday.day:02}")
-        flowing_year = format_layers(fy_total)
-        fm_ref = get_flowing_month_ref(d, birthday)
-        fm_total = sum(int(x) for x in f"{birthday.year}{fm_ref:02}{birthday.day:02}")
-        flowing_month = format_layers(fm_total)
-        data.append({
-            "日期 (Date)": d.strftime("%Y-%m-%d"),
-            "星期 (Day)": d.strftime("%A"),
-            "流年 (Year Num)": flowing_year,
-            "流月 (Month Num)": flowing_month,
-            "流日 (Day Num)": flowing_day,
-            "運勢指數 (Stars)": get_flowing_day_star(flowing_day),
-            "指引 (Guidance)": guidance,
-            "幸運色 (Color)": lucky.get("色", ""),
-            "水晶 (Crystal)": lucky.get("水晶", ""),
-            "幸運小物 (Item)": lucky.get("小物", "")
-        })
-
-    df = pd.DataFrame(data)
-    st.dataframe(df, use_container_width=True)
-    file_name = f"LuckyCalendar_{target_year_for_calendar}_{str(target_month).zfill(2)}.xlsx"
-    if not df.empty:
-        output = style_excel(df)
-        st.markdown(f"### 樂覺製所生命靈數")
-        # 下載按鈕加上回呼函式來計算下載次數
-        st.download_button(
-            label="📥 點此下載 Excel (Download)",
-            data=output.getvalue(),
-            file_name=file_name,
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            on_click=log_download,
-            args=(file_name,)
-        )
-    else:
-        st.warning("⚠️ 無法匯出 Excel：目前資料為空 (No data to export)")
-
-# =========================
-# 後台管理區 (側邊欄)
-# =========================
-st.sidebar.markdown("---")
-# 修改標題，只保留中文
-st.sidebar.subheader("🔒 管理員專區")
-
-# 恢復密碼輸入框
-admin_password = st.sidebar.text_input("輸入密碼", type="password")
-
-if admin_password == "admin123":  # 預設密碼
-    st.sidebar.success("已登入")
-    stats_df = get_download_stats()
-    visits_df = get_visit_stats()
+    df = df.rename(columns=rename_map)
     
-    # 顯示兩個指標：總瀏覽次數 & 總下載次數
-    col_a, col_b = st.sidebar.columns(2)
-    with col_a:
-        st.sidebar.metric("👀 總瀏覽", len(visits_df))
-    with col_b:
-        st.sidebar.metric("📥 總下載", len(stats_df))
+    # 補齊欄位
+    for col in COLUMNS:
+        if col not in df.columns:
+            if 'mm' in col or '價' in col or '數量' in col or '成本' in col:
+                df[col] = 0
+            else:
+                df[col] = ""
     
-    st.sidebar.write("---")
+    # 只保留 COLUMNS 定義的欄位
+    return df[COLUMNS]
+
+def generate_new_id(category, df):
+    """產生 ST/AC/OT 編號"""
+    prefix_map = {'天然石': 'ST', '配件': 'AC', '耗材': 'OT'}
+    prefix = prefix_map.get(category, "OT")
     
-    if not visits_df.empty:
-         with st.sidebar.expander("查看瀏覽紀錄 (Visits)"):
-            st.dataframe(visits_df)
+    if df.empty or '編號' not in df.columns: return f"{prefix}0001"
+    
+    df_ids = df['編號'].astype(str)
+    mask = df_ids.str.startswith(prefix, na=False)
+    numeric_part = df_ids[mask].str[2:].str.extract(r'(\d+)', expand=False).dropna()
+    
+    if numeric_part.empty: next_num = 1
+    else: next_num = numeric_part.astype(int).max() + 1
+    
+    return f"{prefix}{next_num:04d}"
+
+def merge_inventory_duplicates(df):
+    """合併重複項目"""
+    if df.empty: return df, 0
+    group_cols = ['分類', '名稱', '寬度mm', '長度mm', '形狀', '五行']
+    
+    if not set(group_cols).issubset(df.columns): return df, 0
+    
+    work_df = df.copy()
+    work_df['庫存(顆)'] = pd.to_numeric(work_df['庫存(顆)'], errors='coerce').fillna(0)
+    work_df['單顆成本'] = pd.to_numeric(work_df['單顆成本'], errors='coerce').fillna(0)
+    original_count = len(work_df)
+    
+    work_df['總成本'] = work_df['庫存(顆)'] * work_df['單顆成本']
+    
+    agg = work_df.groupby(group_cols, as_index=False).agg({
+        '庫存(顆)': 'sum', '總成本': 'sum', '進貨日期': 'max'
+    })
+    agg['單顆成本'] = agg.apply(lambda r: (r['總成本'] / r['庫存(顆)']) if r['庫存(顆)'] > 0 else 0, axis=1)
+    agg = agg.drop(columns=['總成本'])
+    
+    work_df['進貨日期_排序'] = pd.to_datetime(work_df['進貨日期'], errors='coerce')
+    base_rows = work_df.sort_values(['進貨日期_排序', '編號'], ascending=[False, False]).groupby(group_cols, as_index=False).first()
+    
+    final_df = pd.merge(agg, base_rows[['編號', '進貨廠商'] + group_cols], on=group_cols, how='left')
+    
+    return normalize_columns(final_df), original_count - len(final_df)
+
+def format_size(row):
+    """將寬度與長度格式化為易讀字串"""
+    try:
+        w = float(row.get('寬度mm', 0))
+        l = float(row.get('長度mm', 0))
+        if w > 0:
+            if l == 0 or l == w: return f"{w}mm"
+            else: return f"{w}x{l}mm"
+    except: pass
+    return ""
+
+def make_inventory_label(row):
+    size_str = format_size(row)
+    size_disp = f"({size_str})" if size_str else ""
+    return f"{str(row['編號'])} | {str(row['名稱'])} {size_disp} | 存:{row['庫存(顆)']}"
+
+def make_design_label(row):
+    size_str = format_size(row)
+    size_disp = f"({size_str})" if size_str else ""
+    shape_str = str(row.get('形狀', '')).strip()
+    return f"【{str(row['五行'])}】{str(row['名稱'])} | {shape_str} {size_disp} | ${float(row['單顆成本']):.1f}/顆 | 存:{row['庫存(顆)']}"
+
+def get_dynamic_options(column_name, default_list):
+    options = set(default_list)
+    if not st.session_state['inventory'].empty:
+        existing = st.session_state['inventory'][column_name].dropna().unique().tolist()
+        options.update([str(x) for x in existing if str(x).strip() != ""])
+    return ["➕ 手動輸入/新增"] + sorted(list(options))
+
+# ==========================================
+# 3. 初始化 Session State
+# ==========================================
+
+if 'inventory' not in st.session_state:
+    if os.path.exists(DEFAULT_CSV_FILE):
+        try:
+            df = pd.read_csv(DEFAULT_CSV_FILE)
+            st.session_state['inventory'] = normalize_columns(df)
+        except: st.session_state['inventory'] = pd.DataFrame(columns=COLUMNS)
+    else: st.session_state['inventory'] = pd.DataFrame(columns=COLUMNS)
+
+# 強制正規化與修復
+if 'inventory' in st.session_state:
+    st.session_state['inventory'] = normalize_columns(st.session_state['inventory'])
+
+if 'history' not in st.session_state:
+    st.session_state['history'] = pd.DataFrame(columns=HISTORY_COLUMNS)
+else:
+    if '單號' not in st.session_state['history'].columns:
+        st.session_state['history'].insert(1, '單號', '')
+
+if 'design_history' not in st.session_state:
+    if os.path.exists(DESIGN_HISTORY_FILE):
+        try:
+            st.session_state['design_history'] = pd.read_csv(DESIGN_HISTORY_FILE)
+        except: st.session_state['design_history'] = pd.DataFrame(columns=DESIGN_HISTORY_COLUMNS)
+    else: st.session_state['design_history'] = pd.DataFrame(columns=DESIGN_HISTORY_COLUMNS)
+
+if 'current_design' not in st.session_state:
+    st.session_state['current_design'] = []
+
+# ==========================================
+# 4. UI 介面
+# ==========================================
+
+st.set_page_config(page_title="GemCraft 庫存管理系統", layout="wide")
+st.title("💎 GemCraft 庫存管理系統")
+
+with st.sidebar:
+    st.header("功能導航")
+    page = st.radio("前往", ["📦 庫存管理與進貨", "📜 進貨紀錄查詢", "🧮 設計與成本計算"])
+    st.divider()
+    
+    if not st.session_state['inventory'].empty:
+        csv = st.session_state['inventory'].to_csv(index=False).encode('utf-8-sig')
+        st.download_button("📥 下載庫存 (CSV)", csv, f'inventory_{date.today()}.csv', "text/csv")
+        
+    uploaded_inv = st.file_uploader("📤 上傳庫存備份 (CSV)", type=['csv'])
+    if uploaded_inv:
+        try:
+            df = pd.read_csv(uploaded_inv)
+            st.session_state['inventory'] = normalize_columns(df)
+            save_inventory()
+            st.success("庫存還原成功！")
+            st.rerun()
+        except Exception as e: st.error(f"讀取失敗: {e}")
+
+# ------------------------------------------
+# 頁面: 庫存管理 (★ 這裡修正了 SyntaxError ★)
+# ------------------------------------------
+if page == "📦 庫存管理與進貨":
+    st.subheader("📦 庫存管理")
+    tab1, tab2, tab3 = st.tabs(["🔄 舊品補貨", "✨ 建立新商品", "🛠️ 修改與刪除"])
+    
+    # === Tab 1: 補貨 ===
+    with tab1:
+        st.caption("已有編號商品補貨")
+        inv_df = st.session_state['inventory']
+        if not inv_df.empty:
+            inv_df['label'] = inv_df.apply(make_inventory_label, axis=1)
+            target_label = st.selectbox("選擇商品", inv_df['label'].tolist())
+            target_row = inv_df[inv_df['label'] == target_label].iloc[0]
+            target_idx = inv_df[inv_df['label'] == target_label].index[0]
             
-    if not stats_df.empty:
-        with st.sidebar.expander("查看下載紀錄 (Downloads)"):
-            st.dataframe(stats_df)
-elif admin_password:
-    st.sidebar.error("密碼錯誤")
+            with st.form("restock"):
+                st.write(f"目前庫存: **{target_row['庫存(顆)']}**")
+                batch_no = st.text_input("進貨單號 (選填)", placeholder="Auto")
+                c1, c2 = st.columns(2)
+                qty = c1.number_input("進貨數量", 1)
+                cost = c2.number_input("進貨總價", 0)
+                
+                if st.form_submit_button("📦 確認補貨"):
+                    new_qty = target_row['庫存(顆)'] + qty
+                    old_val = target_row['庫存(顆)'] * target_row['單顆成本']
+                    new_avg = (old_val + cost) / new_qty if new_qty > 0 else 0
+                    
+                    st.session_state['inventory'].at[target_idx, '庫存(顆)'] = new_qty
+                    st.session_state['inventory'].at[target_idx, '單顆成本'] = new_avg
+                    st.session_state['inventory'].at[target_idx, '進貨日期'] = date.today()
+                    
+                    log = {
+                        '紀錄時間': datetime.now().strftime("%Y-%m-%d %H:%M"),
+                        '單號': batch_no if batch_no else f"AUTO-{int(time.time())}",
+                        '動作': '補貨',
+                        '編號': target_row['編號'], '分類': target_row['分類'], '名稱': target_row['名稱'],
+                        '規格': format_size(target_row), '廠商': target_row['進貨廠商'],
+                        '進貨數量': qty, '進貨總價': cost, '單價': cost/qty if qty>0 else 0
+                    }
+                    st.session_state['history'] = pd.concat([st.session_state['history'], pd.DataFrame([log])], ignore_index=True)
+                    save_inventory()
+                    st.success("補貨成功！")
+                    st.rerun()
+        else: st.info("無庫存")
+
+    # === Tab 2: 建立新商品 ===
+    with tab2:
+        with st.container():
+            st.markdown("##### 1. 基本資料")
+            c1, c2 = st.columns([1, 2])
+            with c1: 
+                new_cat = st.selectbox("分類 (產生編號用)", ["天然石", "配件", "耗材"])
+            with c2:
+                existing_names = []
+                if not st.session_state['inventory'].empty:
+                    cat_df = st.session_state['inventory'][st.session_state['inventory']['分類'] == new_cat]
+                    existing_names = sorted(cat_df['名稱'].dropna().unique().astype(str).tolist())
+                name_opts = ["➕ 手動輸入/新增"] + existing_names
+                name_sel = st.selectbox("名稱", name_opts)
+                final_name = st.text_input("↳ 輸入新名稱") if name_sel == "➕ 手動輸入/新增" else name_sel
+
+            st.markdown("##### 2. 規格尺寸 (mm)")
+            c3a, c3b = st.columns(2)
+            with c3a:
+                w_opts = get_dynamic_options('寬度mm', [])
+                w_sel = st.selectbox("寬度/直徑", w_opts)
+                final_w = st.number_input("↳ 輸入寬度", 0.0, step=0.5) if w_sel == "➕ 手動輸入/新增" else float(w_sel)
+            with c3b:
+                final_l = st.number_input("長度 (圓珠可不填)", 0.0, step=0.5)
+                if final_l == 0.0 and final_w > 0: st.caption(f"預設為 {final_w}")
+
+        prev_row = None
+        if final_name and not st.session_state['inventory'].empty:
+            same_name_df = st.session_state['inventory'][(st.session_state['inventory']['分類'] == new_cat) & (st.session_state['inventory']['名稱'] == final_name)]
+            if not same_name_df.empty:
+                prev_row = same_name_df.iloc[-1]
+
+        with st.form("add_new"):
+            st.markdown("##### 3. 詳細資訊")
+            batch_id_new = st.text_input("進貨單號 (選填)", placeholder="Auto")
+
+            shape_opts = get_dynamic_options('形狀', DEFAULT_SHAPES)
+            elem_opts = get_dynamic_options('五行', DEFAULT_ELEMENTS)
+            sup_opts = get_dynamic_options('進貨廠商', DEFAULT_SUPPLIERS)
+            
+            def get_idx(opts, val):
+                try: return opts.index(val)
+                except: return 0
+
+            idx_s = get_idx(shape_opts, prev_row['形狀']) if prev_row is not None else 0
+            idx_e = get_idx(elem_opts, prev_row['五行']) if prev_row is not None else 0
+            idx_p = get_idx(sup_opts, prev_row['進貨廠商']) if prev_row is not None else 0
+
+            c4, c5, c6 = st.columns(3)
+            with c4: s_sel = st.selectbox("形狀", shape_opts, index=idx_s)
+            with c5: e_sel = st.selectbox("五行", elem_opts, index=idx_e)
+            with c6: p_sel = st.selectbox("廠商", sup_opts, index=idx_p)
+            
+            mc1, mc2, mc3 = st.columns(3)
+            final_shape = mc1.text_input("↳ 新形狀") if s_sel == "➕ 手動輸入/新增" else s_sel
+            final_elem = mc2.text_input("↳ 新五行") if e_sel == "➕ 手動輸入/新增" else e_sel
+            final_sup = mc3.text_input("↳ 新廠商") if p_sel == "➕ 手動輸入/新增" else p_sel
+
+            c7, c8, c9 = st.columns(3)
+            with c7: price = st.number_input("進貨總價", 0)
+            with c8: qty = st.number_input("進貨數量", 1)
+            with c9: p_date = st.date_input("進貨日期", value=date.today())
+            
+            if st.form_submit_button("➕ 確認新增入庫", type="primary"):
+                if not all([final_name, final_shape, final_elem, final_sup]):
+                    st.error("❌ 請填寫完整欄位")
+                else:
+                    save_l = final_l if final_l > 0 else (final_w if "圓" in final_shape or "珠" in final_shape else 0.0)
+                    new_id = generate_new_id(new_cat, st.session_state['inventory'])
+                    unit_cost = price / qty if qty > 0 else 0
+                    
+                    new_row = {
+                        '編號': new_id, '分類': new_cat, '名稱': final_name, 
+                        '寬度mm': final_w, '長度mm': save_l,
+                        '形狀': final_shape, '五行': final_elem, 
+                        '進貨總價': price, '進貨數量(顆)': qty, 
+                        '進貨日期': p_date, '進貨廠商': final_sup,
+                        '庫存(顆)': qty, '單顆成本': unit_cost
+                    }
+                    st.session_state['inventory'] = pd.concat([st.session_state['inventory'], pd.DataFrame([new_row])], ignore_index=True)
+                    
+                    log = {
+                        '紀錄時間': datetime.now().strftime("%Y-%m-%d %H:%M"), 
+                        '單號': batch_id_new if batch_id_new else f"AUTO-{int(time.time())}", 
+                        '動作': '進貨',
+                        '編號': new_id, '分類': new_cat, '名稱': final_name,
+                        '規格': f"{final_w}x{save_l}mm", '形狀': final_shape,
+                        '廠商': final_sup, '進貨數量': qty, '進貨總價': price, '單價': unit_cost
+                    }
+                    st.session_state['history'] = pd.concat([st.session_state['history'], pd.DataFrame([log])], ignore_index=True)
+                    save_inventory()
+                    st.success(f"✅ 已新增：{final_name} - {new_id}")
+                    time.sleep(1)
+                    st.rerun()
+
+    # === Tab 3: 修改 ===
+    with tab3:
+        st.markdown("##### 🛠️ 修正或刪除")
+        if not st.session_state['inventory'].empty:
+            edit_df = st.session_state['inventory'].copy()
+            edit_df['label'] = edit_df.apply(make_inventory_label, axis=1)
+            
+            sel_label = st.selectbox("🔍 選擇要修改的商品", edit_df['label'].tolist())
+            orig_row = edit_df[edit_df['label'] == sel_label].iloc[0]
+            orig_idx = st.session_state['inventory'][st.session_state['inventory']['編號'] == orig_row['編號']].index[0]
+
+            with st.form("edit_form"):
+                st.info(f"編輯中：{orig_row['編號']}")
+                ec1, ec2, ec3 = st.columns(3)
+                with ec1: ename = st.text_input("名稱", value=orig_row['名稱'])
+                with ec2: ewidth = st.number_input("寬度mm", value=float(orig_row['寬度mm']), step=0.1)
+                with ec3: elength = st.number_input("長度mm", value=float(orig_row['長度mm']), step=0.1)
+
+                shp_opts = get_dynamic_options('形狀', DEFAULT_SHAPES)
+                elm_opts = get_dynamic_options('五行', DEFAULT_ELEMENTS)
+                sup_opts = get_dynamic_options('進貨廠商', DEFAULT_SUPPLIERS)
+                
+                def get_eidx(opts, val):
+                    try: return opts.index(val)
+                    except: return 0
+
+                ec4, ec5, ec6 = st.columns(3)
+                with ec4: eshp_sel = st.selectbox("形狀", shp_opts, index=get_eidx(shp_opts, orig_row['形狀']))
+                with ec5: eelm_sel = st.selectbox("五行", elm_opts, index=get_eidx(elm_opts, orig_row['五行']))
+                with ec6: esup_sel = st.selectbox("廠商", sup_opts, index=get_eidx(sup_opts, orig_row['進貨廠商']))
+
+                em1, em2, em3 = st.columns(3)
+                eshape = em1.text_input("↳ 新形狀") if eshp_sel == "➕ 手動輸入/新增" else eshp_sel
+                eelem = em2.text_input("↳ 新五行") if eelm_sel == "➕ 手動輸入/新增" else eelm_sel
+                esup = em3.text_input("↳ 新廠商") if esup_sel == "➕ 手動輸入/新增" else esup_sel
+
+                st.divider()
+                ec7, ec8 = st.columns(2)
+                with ec7: estock = st.number_input("庫存數量", value=int(orig_row['庫存(顆)']), step=1)
+                with ec8: ecost = st.number_input("單顆成本", value=float(orig_row['單顆成本']), step=0.1, format="%.2f")
+
+                bt1, bt2 = st.columns([1, 1])
+                with bt1:
+                    if st.form_submit_button("💾 儲存修改"):
+                        st.session_state['inventory'].at[orig_idx, '名稱'] = ename
+                        st.session_state['inventory'].at[orig_idx, '寬度mm'] = ewidth
+                        st.session_state['inventory'].at[orig_idx, '長度mm'] = elength
+                        st.session_state['inventory'].at[orig_idx, '形狀'] = eshape
+                        st.session_state['inventory'].at[orig_idx, '五行'] = eelem
+                        st.session_state['inventory'].at[orig_idx, '進貨廠商'] = esup
+                        st.session_state['inventory'].at[orig_idx, '庫存(顆)'] = estock
+                        st.session_state['inventory'].at[orig_idx, '單顆成本'] = ecost
+                        save_inventory()
+                        st.success("✅ 更新成功")
+                        time.sleep(1)
+                        st.rerun()
+
+                with bt2:
+                    if st.form_submit_button("🗑️ 刪除商品", type="primary"):
+                        st.session_state['inventory'] = st.session_state['inventory'].drop(orig_idx).reset_index(drop=True)
+                        save_inventory()
+                        st.success("已刪除")
+                        time.sleep(1)
+                        st.rerun()
+        else:
+            st.info("無資料")
+
+    st.divider()
+    c_list1, c_list2 = st.columns([3, 1])
+    with c_list1: st.markdown("### 📋 庫存總表")
+    with c_list2:
+        if st.button("🔄 合併重複項目"):
+            mdf, cnt = merge_inventory_duplicates(st.session_state['inventory'])
+            st.session_state['inventory'] = mdf
+            save_inventory()
+            st.success(f"已合併 {cnt} 筆")
+            time.sleep(1)
+            st.rerun()
+
+    search = st.text_input("🔍 搜尋庫存", "")
+    disp_df = st.session_state['inventory']
+    if search:
+        disp_df = disp_df[
+            disp_df['名稱'].astype(str).str.contains(search, case=False) |
+            disp_df['編號'].astype(str).str.contains(search, case=False)
+        ]
+    st.dataframe(disp_df, use_container_width=True, height=400,
+                 column_config={
+                     "進貨總價": st.column_config.NumberColumn(format="$%d"),
+                     "單顆成本": st.column_config.NumberColumn(format="$%.2f"),
+                     "寬度mm": st.column_config.NumberColumn(format="%.1f"),
+                     "長度mm": st.column_config.NumberColumn(format="%.1f")
+                 })
+
+# ------------------------------------------
+# 頁面 B: 紀錄
+# ------------------------------------------
+elif page == "📜 進貨紀錄查詢":
+    st.subheader("📜 歷史紀錄中心")
+    tab_log, tab_sales = st.tabs(["📦 庫存異動流水帳", "💎 訂單銷售紀錄"])
+    with tab_log: st.dataframe(st.session_state['history'], use_container_width=True)
+    with tab_sales: st.dataframe(st.session_state['design_history'], use_container_width=True)
+
+# ------------------------------------------
+# 頁面 C: 設計與成本
+# ------------------------------------------
+elif page == "🧮 設計與成本計算":
+    st.subheader("🧮 成本試算與報價")
+    
+    inv = st.session_state['inventory']
+    if not inv.empty:
+        # 五行篩選
+        all_elements = sorted(inv['五行'].astype(str).unique().tolist())
+        st.write("👇 **第一步：選擇五行屬性 (可複選)**")
+        selected_elements = st.multiselect("五行", all_elements, default=all_elements)
+        if not selected_elements: selected_elements = all_elements
+        
+        filtered_inv = inv[inv['五行'].isin(selected_elements)].sort_values(by=['五行', '名稱', '編號'])
+
+        st.divider()
+
+        if not filtered_inv.empty:
+            filtered_inv['disp_label'] = filtered_inv.apply(make_design_label, axis=1)
+            
+            c_sel, c_qty, c_btn = st.columns([3, 1, 1])
+            with c_sel:
+                selected_item_label = st.selectbox(
+                    f"👇 選擇材料 (篩選後共 {len(filtered_inv)} 筆)", 
+                    filtered_inv['disp_label'].tolist()
+                )
+            
+            with c_qty:
+                input_qty = st.number_input("數量", min_value=1, value=1)
+            
+            with c_btn:
+                st.write("") 
+                st.write("") 
+                if st.button("⬇️ 加入清單", use_container_width=True, type="primary"):
+                    selected_row = filtered_inv[filtered_inv['disp_label'] == selected_item_label].iloc[0]
+                    subtotal = selected_row['單顆成本'] * input_qty
+                    
+                    st.session_state['current_design'].append({
+                        '編號': selected_row['編號'], 
+                        '名稱': selected_row['名稱'],
+                        '形狀': selected_row['形狀'], 
+                        '規格': format_size(selected_row), 
+                        '單價': selected_row['單顆成本'], 
+                        '數量': input_qty, 
+                        '小計': subtotal
+                    })
+                    st.success(f"已加入 {input_qty} 顆 {selected_row['名稱']}")
+
+            st.divider()
+            
+            if st.session_state['current_design']:
+                df_design = pd.DataFrame(st.session_state['current_design'])
+                
+                # 防呆
+                for col in ['名稱', '形狀', '規格', '單價', '數量', '小計']:
+                    if col not in df_design.columns: df_design[col] = 0
+
+                st.table(df_design[['名稱', '形狀', '規格', '單價', '數量', '小計']])
+                
+                if st.button("🗑️ 清除最後一項"):
+                    st.session_state['current_design'].pop()
+                    st.rerun()
+                
+                mat_cost = df_design['小計'].sum()
+                st.markdown("#### 💰 成本結構")
+                c_labor, c_misc = st.columns(2)
+                labor = c_labor.number_input("工資 ($)", 0, step=10)
+                misc = c_misc.number_input("雜支/運費 ($)", 0, step=5)
+                
+                total_base = mat_cost + labor + misc
+                price_x3 = (mat_cost * 3) + labor + misc
+                price_x5 = (mat_cost * 5) + labor + misc
+                
+                st.info(f"💎 基礎材料費: ${mat_cost:.1f}")
+                m1, m2, m3 = st.columns(3)
+                m1.metric("總成本", f"${total_base:.0f}")
+                m2.metric("建議售價 (x3)", f"${price_x3:.0f}")
+                m3.metric("建議售價 (x5)", f"${price_x5:.0f}")
+                
+                st.divider()
+                sale_id = st.text_input("訂單編號", placeholder="例如: 蝦皮241212...")
+                
+                if st.button("✅ 確認售出 (扣除庫存並記錄)", type="primary"):
+                    if not sale_id: sale_id = f"S-{int(time.time())}"
+                    
+                    detail_str = []
+                    total_qty = 0
+                    
+                    for item in st.session_state['current_design']:
+                        mask = st.session_state['inventory']['編號'] == item['編號']
+                        if mask.any():
+                            idx = st.session_state['inventory'][mask].index[0]
+                            st.session_state['inventory'].at[idx, '庫存(顆)'] -= item['數量']
+                        
+                        log = {
+                            '紀錄時間': datetime.now().strftime("%Y-%m-%d %H:%M"),
+                            '單號': sale_id, '動作': '售出',
+                            '編號': item['編號'], '分類': '', '名稱': item['名稱'], 
+                            '規格': item['規格'], '進貨數量': -item['數量'],
+                            '進貨總價': 0, '單價': item['單價']
+                        }
+                        st.session_state['history'] = pd.concat([st.session_state['history'], pd.DataFrame([log])], ignore_index=True)
+                        detail_str.append(f"{item['名稱']}({item['編號']})x{item['數量']}")
+                        total_qty += item['數量']
+                    
+                    design_log = {
+                        '單號': sale_id, '日期': date.today(), '總顆數': total_qty,
+                        '材料成本': mat_cost, '工資': labor, '雜支': misc,
+                        '總成本': total_base, '售價(x3)': price_x3, '售價(x5)': price_x5,
+                        '明細內容': " | ".join(detail_str)
+                    }
+                    st.session_state['design_history'] = pd.concat(
+                        [st.session_state['design_history'], pd.DataFrame([design_log])], ignore_index=True
+                    )
+                    
+                    save_inventory()
+                    save_design_history()
+                    st.session_state['current_design'] = []
+                    st.success(f"已完成售出扣帳！單號：{sale_id}")
+                    time.sleep(1)
+                    st.rerun()
+        else:
+            st.warning("⚠️ 找不到符合條件的庫存項目，請檢查五行篩選或庫存是否為空。")
+    else:
+        st.info("目前庫存為空，請先至「📦 庫存管理」建立商品。")
