@@ -70,11 +70,11 @@ def calculate_blueprint_stages(birthday: datetime.date, hour_val, min_val):
         st_child_display = format_layers(st_young_adult + h_sum + m_sum_val)
 
     return [
-        {"name": "老年階段", "age": "60 歲以上", "val": format_layers(st_old)},
-        {"name": "中年階段", "age": "40 – 60 歲", "val": format_layers(st_middle)},
-        {"name": "青年階段", "age": "20 – 39 歲", "val": format_layers(st_young_adult)},
-        {"name": "少年階段", "age": "10 – 19 歲", "val": st_teen_display},
-        {"name": "幼年階段", "age": "0 – 09 歲", "val": st_child_display},
+        {"name": "老年階段", "age": "61 歲以上", "val": format_layers(st_old)},
+        {"name": "中年階段", "age": "41 – 60 歲", "val": format_layers(st_middle)},
+        {"name": "青年階段", "age": "21 – 40 歲", "val": format_layers(st_young_adult)},
+        {"name": "少年階段", "age": "11 – 20 歲", "val": st_teen_display},
+        {"name": "幼年階段", "age": "0 – 10 歲", "val": st_child_display},
     ]
 
 def calculate_life_path_number(birthday: datetime.date):
