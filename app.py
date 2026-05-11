@@ -40,38 +40,48 @@ def format_layers(total: int) -> str:
         return f"{total}/{mid}"
 
 # =========================
-# 3. 生命藍圖階段數計算 (精準年齡條件)
+# 3. 生命藍圖階段數計算 (處理「不知道」的情況)
 # =========================
-def calculate_blueprint_stages(birthday: datetime.date, hour: int, minute: int):
-    # 拆解各單位數字
+def calculate_blueprint_stages(birthday: datetime.date, hour_val, min_val):
+    # 基礎單位數字加總
     y_sum = sum(int(x) for x in str(birthday.year))
     m_sum = sum(int(x) for x in f"{birthday.month:02}")
     d_sum = sum(int(x) for x in f"{birthday.day:02}")
-    h_sum = sum(int(x) for x in f"{hour:02}")
-    min_sum = sum(int(x) for x in f"{minute:02}")
-
-    # 累加邏輯 (老 -> 幼)
+    
+    # 累加邏輯
     st_old = y_sum                      # 老年
     st_middle = st_old + m_sum          # 中年
     st_young_adult = st_middle + d_sum  # 青年
-    st_teen = st_young_adult + h_sum    # 少年
-    st_child = st_teen + min_sum        # 幼年
 
-    # 這裡的順序決定了畫面上輸出的內容順序
+    # 處理時間相關階段
+    # 少年階段 (需要小時)
+    if hour_val == "不知道":
+        st_teen_display = "--"
+    else:
+        h_sum = sum(int(x) for x in f"{int(hour_val):02}")
+        st_teen_display = format_layers(st_young_adult + h_sum)
+
+    # 幼年階段 (需要小時與分鐘)
+    if hour_val == "不知道" or min_val == "不知道":
+        st_child_display = "--"
+    else:
+        h_sum = sum(int(x) for x in f"{int(hour_val):02}")
+        m_sum_val = sum(int(x) for x in f"{int(min_val):02}")
+        st_child_display = format_layers(st_young_adult + h_sum + m_sum_val)
+
     return [
         {"name": "老年階段", "age": "60 歲以上", "val": format_layers(st_old)},
         {"name": "中年階段", "age": "40 – 60 歲", "val": format_layers(st_middle)},
         {"name": "青年階段", "age": "20 – 39 歲", "val": format_layers(st_young_adult)},
-        {"name": "少年階段", "age": "10 – 19 歲", "val": format_layers(st_teen)},
-        {"name": "幼年階段", "age": "0 – 09 歲", "val": format_layers(st_child)},
+        {"name": "少年階段", "age": "10 – 19 歲", "val": st_teen_display},
+        {"name": "幼年階段", "age": "0 – 09 歲", "val": st_child_display},
     ]
 
 def calculate_life_path_number(birthday: datetime.date):
     date_str = birthday.strftime("%Y%m%d")
     total_sum = sum(int(char) for char in date_str)
     final_num = reduce_to_digit(total_sum)
-    process_str = f"{total_sum} → {final_num}"
-    return final_num, total_sum, process_str
+    return final_num, total_sum, f"{total_sum} → {final_num}"
 
 def life_year_number_for_date(birthday: datetime.date, query_date: datetime.date) -> int:
     cutoff = datetime.date(query_date.year, birthday.month, birthday.day)
@@ -87,43 +97,48 @@ st.set_page_config(page_title="樂覺製所生命靈數 | Numerology", layout="c
 st.title("🧭 樂覺製所生命靈數")
 st.markdown("在數字之中，我們與自己不期而遇。\n**Be true, be you — 讓靈魂，自在呼吸。**")
 
-# --- 輸入區佈局 ---
 st.subheader("🌟 生命靈數 & 階段藍圖速算")
 col_in1, col_in2 = st.columns(2)
 
 with col_in1:
-    # 放寬日期範圍，避免 1980 以前的日期報錯
     birthday = st.date_input("請輸入生日 (Birthday)", 
                              value=datetime.date(1990, 1, 1),
-                             min_value=datetime.date(1900, 1, 1),
-                             max_value=datetime.date(2100, 12, 31))
+                             min_value=datetime.date(1900, 1, 1))
+    
     st.markdown("**出生時間 (Time)**")
     t_c1, t_c2 = st.columns(2)
+    
+    # 時、分下拉選單，加入「不知道」選項
+    hour_options = ["不知道"] + [str(i) for i in range(24)]
+    min_options = ["不知道"] + [str(i) for i in range(60)]
+    
     with t_c1:
-        birth_hour = st.number_input("時 (0-23)", 0, 23, 10)
+        birth_hour = st.selectbox("時 (Hour)", options=hour_options, index=11) # 預設 10點 (index 11)
     with t_c2:
-        birth_min = st.number_input("分 (0-59)", 0, 59, 0)
+        birth_min = st.selectbox("分 (Min)", options=min_options, index=1)   # 預設 0分 (index 1)
 
 with col_in2:
     ref_date = st.date_input("查詢日期 (Query Date)", value=datetime.date.today())
 
-# --- 計算按鈕與顯示 ---
 if st.button("🔮 計算靈數與階段藍圖 (Calculate)"):
-    life_num, life_sum, life_process = calculate_life_path_number(birthday)
+    life_num, _, life_process = calculate_life_path_number(birthday)
     
     st.markdown("---")
     st.markdown(f"### 🔮 您的生命靈數主命數：【 {life_num} 】號人")
     
-    # 顯示階段藍圖：由左至右 (老年 -> 幼年)
     st.markdown("### 🗺️ 生命藍圖五大階段 (Life Blueprint Stages)")
     blueprint_stages = calculate_blueprint_stages(birthday, birth_hour, birth_min)
     
     s_cols = st.columns(5)
-    # 直接循環計算結果，不再反轉，讓「老年階段」排在最左邊
+    # 排列順序：最左邊是老年，最右邊是幼年
     for i, stage in enumerate(blueprint_stages):
         with s_cols[i]:
             st.markdown(f"**{stage['name']}**")
-            st.info(f"**{stage['val']}**")
+            # 判斷是否為 --，給予不同的呈現感
+            if stage['val'] == "--":
+                st.info("**--**")
+            else:
+                st.info(f"**{stage['val']}**")
             st.caption(stage['age'])
     
     st.markdown("---")
