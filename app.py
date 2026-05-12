@@ -2,6 +2,7 @@
 import streamlit as st
 import datetime
 import pandas as pd
+from borax.calendars.lunardate import LunarDate # 請確保環境有安裝 borax
 
 # =========================
 # 核心計算工具
@@ -21,42 +22,43 @@ def format_layers(total: int) -> str:
     else:
         return f"{total}/{mid}"
 
-# =========================
-# 階段藍圖與自動高亮判斷
-# =========================
 def get_current_stage_idx(age):
-    """根據年齡判斷目前處於哪個階段索引 (0-4)"""
-    if age >= 60: return 0  # 老年
-    if 40 <= age <= 60: return 1  # 中年
-    if 20 <= age <= 39: return 2  # 青年
-    if 10 <= age <= 19: return 3  # 少年
-    return 4  # 幼年
+    """判斷目前年齡對應的階段索引"""
+    if age >= 60: return 0
+    if 40 <= age < 60: return 1
+    if 20 <= age < 40: return 2
+    if 10 <= age < 20: return 3
+    return 4
 
-def calculate_blueprint_stages(birthday, hour_val, min_val, ref_date):
-    y_sum = sum(int(x) for x in str(birthday.year))
-    m_sum = sum(int(x) for x in f"{birthday.month:02}")
-    d_sum = sum(int(x) for x in f"{birthday.day:02}")
+# =========================
+# 階段藍圖計算邏輯 (通用型)
+# =========================
+def calculate_generic_stages(y, m, d, hour_val, min_val, ref_date, birth_date_for_age):
+    y_sum = sum(int(x) for x in f"{y:04}")
+    m_sum = sum(int(x) for x in f"{m:02}")
+    d_sum = sum(int(x) for x in f"{d:02}")
     
     st_old = y_sum
     st_middle = st_old + m_sum
     st_young_adult = st_middle + d_sum
 
-    # 處理時間相關階段
+    # 少年
     if hour_val == "不知道":
         st_teen_display = "--"
         st_child_display = "--"
     else:
         h_sum = sum(int(x) for x in f"{int(hour_val):02}")
         st_teen_display = format_layers(st_young_adult + h_sum)
+        # 幼年
         if min_val == "不知道":
             st_child_display = "--"
         else:
-            m_sum_val = sum(int(x) for x in f"{int(min_val):02}")
-            st_child_display = format_layers(st_young_adult + h_sum + m_sum_val)
+            min_sum_val = sum(int(x) for x in f"{int(min_val):02}")
+            st_child_display = format_layers(st_young_adult + h_sum + min_sum_val)
 
-    # 計算當下年齡
-    current_age = ref_date.year - birthday.year - ((ref_date.month, ref_date.day) < (birthday.month, birthday.day))
-    active_idx = get_current_stage_idx(current_age)
+    # 計算年齡用來高亮 (以國曆生日為準)
+    age = ref_date.year - birth_date_for_age.year - ((ref_date.month, ref_date.day) < (birth_date_for_age.month, birth_date_for_age.day))
+    active_idx = get_current_stage_idx(age)
 
     return [
         {"name": "老年階段", "age": "60 歲以上", "val": format_layers(st_old), "active": active_idx == 0},
@@ -67,64 +69,72 @@ def calculate_blueprint_stages(birthday, hour_val, min_val, ref_date):
     ]
 
 # =========================
-# Streamlit 介面
+# UI 顯示組件
 # =========================
-st.set_page_config(page_title="樂覺製所生命靈數", layout="centered")
-
-st.title("🧭 樂覺製所生命靈數")
-st.markdown("在數字之中，我們與自己不期而遇。")
-
-st.subheader("🌟 生命靈數 & 階段藍圖速算")
-col_in1, col_in2 = st.columns(2)
-
-with col_in1:
-    birthday = st.date_input("請輸入生日 (Birthday)", 
-                             value=datetime.date(1990, 1, 1),
-                             min_value=datetime.date(1900, 1, 1))
-    st.markdown("**出生時間 (Time)**")
-    t_c1, t_c2 = st.columns(2)
-    hour_options = ["不知道"] + [str(i) for i in range(24)]
-    min_options = ["不知道"] + [str(i) for i in range(60)]
-    with t_c1:
-        birth_hour = st.selectbox("時 (Hour)", options=hour_options, index=11)
-    with t_c2:
-        birth_min = st.selectbox("分 (Min)", options=min_options, index=1)
-
-with col_in2:
-    ref_date = st.date_input("查詢日期 (Query Date)", value=datetime.date.today())
-
-if st.button("🔮 計算階段藍圖"):
-    st.markdown("---")
-    st.markdown("### 🗺️ 生命藍圖五大階段 (Life Blueprint Stages)")
-    
-    stages = calculate_blueprint_stages(birthday, birth_hour, birth_min, ref_date)
-    s_cols = st.columns(5)
-    
+def display_stage_row(title, stages):
+    st.markdown(f"#### {title}")
+    cols = st.columns(5)
     for i, stage in enumerate(stages):
-        with s_cols[i]:
-            # 判斷是否為目前階段
+        with cols[i]:
             title_label = f"{stage['name']} ◀ 目前" if stage['active'] else stage['name']
+            st.markdown(f"<p style='text-align: center; font-size: 0.9em; font-weight: bold; margin-bottom: -5px;'>{title_label}</p>", unsafe_allow_html=True)
             
-            # 顯示階段標題
-            st.markdown(f"<p style='text-align: center; font-weight: bold; margin-bottom: -10px;'>{title_label}</p>", unsafe_allow_html=True)
+            bg_color = "#1A337E" if stage['active'] else "#E8F0FE"
+            text_color = "white" if stage['active'] else "#1A337E"
             
-            # 使用自定義 CSS 模擬高亮方塊
-            if stage['active']:
-                # 高亮樣式：深藍背景，白字
-                st.markdown(f"""
-                    <div style="background-color: #1A337E; color: white; padding: 25px 10px; border-radius: 15px; text-align: center; margin: 15px 0;">
-                        <span style="font-size: 24px; font-weight: bold;">{stage['val']}</span>
-                    </div>
-                """, unsafe_allow_html=True)
-            else:
-                # 普通樣式：淺灰藍背景，深藍字
-                st.markdown(f"""
-                    <div style="background-color: #E8F0FE; color: #1A337E; padding: 25px 10px; border-radius: 15px; text-align: center; margin: 15px 0;">
-                        <span style="font-size: 24px; font-weight: bold;">{stage['val']}</span>
-                    </div>
-                """, unsafe_allow_html=True)
-            
-            # 顯示年齡範圍
-            st.markdown(f"<p style='text-align: center; color: gray; font-size: 0.8em;'>{stage['age']}</p>", unsafe_allow_html=True)
+            st.markdown(f"""
+                <div style="background-color: {bg_color}; color: {text_color}; padding: 20px 5px; border-radius: 12px; text-align: center; margin: 10px 0; border: 1px solid #d1d1d1;">
+                    <span style="font-size: 20px; font-weight: bold;">{stage['val']}</span>
+                </div>
+            """, unsafe_allow_html=True)
+            st.markdown(f"<p style='text-align: center; color: gray; font-size: 0.75em;'>{stage['age']}</p>", unsafe_allow_html=True)
+
+# =========================
+# Streamlit 主介面
+# =========================
+st.set_page_config(page_title="樂覺製所生命靈數", layout="wide")
+
+st.title("🧭 樂覺製所生命靈數 & 生命藍圖")
+st.markdown("在數字之中，我們與自己不期而遇。 (In numbers, we meet ourselves unexpectedly.)")
+
+# 輸入區
+with st.expander("📝 輸入生日資訊", expanded=True):
+    c1, c2, c3 = st.columns([2, 1, 1])
+    with c1:
+        birthday = st.date_input("國曆生日", value=datetime.date(1990, 1, 1), min_value=datetime.date(1900, 1, 1))
+    with c2:
+        hour_opts = ["不知道"] + [str(i) for i in range(24)]
+        birth_hour = st.selectbox("出生時", options=hour_opts, index=11)
+    with c3:
+        min_opts = ["不知道"] + [str(i) for i in range(60)]
+        birth_min = st.selectbox("出生分", options=min_opts, index=1)
+    
+    ref_date = st.date_input("查詢日期", value=datetime.date.today())
+
+if st.button("🔮 開始計算藍圖"):
+    st.markdown("---")
+    
+    # 1. 取得農曆日期
+    try:
+        lunar = LunarDate.from_solar_date(birthday.year, birthday.month, birthday.day)
+        lunar_str = f"農曆：{lunar.year}年{lunar.month}月{lunar.day}日"
+    except:
+        lunar_str = "農曆轉換失敗"
+
+    # 2. 計算階段
+    solar_stages = calculate_generic_stages(birthday.year, birthday.month, birthday.day, birth_hour, birth_min, ref_date, birthday)
+    lunar_stages = calculate_generic_stages(lunar.year, lunar.month, lunar.day, birth_hour, birth_min, ref_date, birthday)
+
+    # 3. 渲染畫面
+    st.subheader(f"📅 國曆生日：{birthday} ｜ {lunar_str}")
+    
+    # 顯示國曆
+    display_stage_row("📍 國曆階段數", solar_stages)
+    
+    st.write("") # 間距
+    
+    # 顯示農曆
+    display_stage_row("🏮 農曆階段數", lunar_stages)
 
 st.markdown("---")
+st.caption("樂覺製所 © 2026 Numbertalk")
